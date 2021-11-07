@@ -16,7 +16,7 @@
 import numpy as np
 import scipy.signal
 
-def sTransform(ts, sample_rate, frange=[0, 500], frate = 1, onesided=True, elevated=True, elevation=10e-15):
+def sTransform(ts, sample_rate, frange=[0, 500], frate = 1, onesided=True, elevated=True, elevation=10e-8):
     '''Compute the S Transform
     Input:
                     ts                 (ndarray)            time series data
@@ -35,22 +35,18 @@ def sTransform(ts, sample_rate, frange=[0, 500], frate = 1, onesided=True, eleva
     length = len(ts)               
     Nfreq = [int(frange[0]*length/sample_rate), int(frange[1]*length/sample_rate)]     
     tsVal = np.copy(ts)            
-    ampL = np.zeros((int((Nfreq[1]-Nfreq[0])/frate)+1,length), dtype='c8')                    
+    amp = np.zeros((int((Nfreq[1]-Nfreq[0])/frate)+1,length), dtype='c8')                    
     tsFFT = np.fft.fft(tsVal)               
     vec = np.hstack((tsFFT, tsFFT))         
 
     # set the lowest frequency row to small values => 'zero' frequency     
-    ampL[0] = np.fft.ifft(vec[0:length]*_window_normal(length, 0, elevated=elevated, elevation=elevation))             
+    amp[0] = np.fft.ifft(vec[0:length]*_window_normal(length, 0, elevated=elevated, elevation=elevation))             
     for i in range(frate, (Nfreq[1]-Nfreq[0])+1, frate):                       
-        ampL[int(i/frate)] = np.fft.ifft(vec[Nfreq[0]+i:Nfreq[0]+i+length]*_window_normal(length, Nfreq[0]+i, factor=1, elevated=elevated, elevation=elevation))  
-    if not onesided:
-        ampR = np.zeros((int((Nfreq[1]-Nfreq[0])/frate)+1,length), dtype='c8') 
-        for i in range(frate, (Nfreq[1]-Nfreq[0])+1, frate):
-            ampR[int(i/frate)] = np.fft.ifft(vec[Nfreq[0]+length//2+i:Nfreq[0]+length//2+i+length]*_window_normal(length, Nfreq[0]+i, factor=1, elevated=elevated, elevation=elevation))  
-        return ampL, ampR
-    return ampL
+        amp[int(i/frate)] = np.fft.ifft(vec[Nfreq[0]+i:Nfreq[0]+i+length]*_window_normal(length, Nfreq[0]+i, factor=1, elevated=elevated, elevation=elevation))  
+    
+    return amp
 
-def _window_normal(length, freq, factor = 1, elevated=True, elevation = 10e-15):
+def _window_normal(length, freq, factor = 1, elevated=True, elevation =10e-8):
     '''Gaussian Window function w/ elevation
     Input: 
                     length              (int)               length of the Gaussian window
@@ -72,11 +68,13 @@ def _window_normal(length, freq, factor = 1, elevated=True, elevation = 10e-15):
 
     return win
 
-def recoverS(table, lowFreq = 0):
+def recoverS(table, lowFreq = 0, elevated=True, elevation=10e-8):
     '''Quick 'Perfect' Recovery of Time-Series from S Transform Spectrogram Generated using sTransform
     Input:
                     table               (ndarray)           spectrogram table
                     lowFreq             (int, optional)     starting frequency
+                    elevated            (bool, optional)    when True, add elevation to the Gaussian
+                    elevation           (float, optional)   magnitude of the elevation     
     Output:
                     ts_recovered        (ndarray)           recovered time series
     Note:
@@ -85,35 +83,34 @@ def recoverS(table, lowFreq = 0):
     tablep = np.copy(table)                 
     length = tablep.shape[1]
     s_row = tablep[0]
-    tsFFT_recovered = np.fft.fft(s_row)/_window_normal(length, lowFreq)
+    tsFFT_recovered = np.fft.fft(s_row)/_window_normal(length, lowFreq, elevated=elevated, elevation=elevation)
 
     ts_recovered = np.fft.ifft(tsFFT_recovered)
 
     return ts_recovered
 
-def inverseS(table, lowFreq = 0):
+def inverseS(table, lowFreq = 0, elevated=True, elevation =10e-8):
     '''The True Inverse S Transform (without optimization)
     Input:
                     table               (ndarray)           spectrogram table
                     lowFreq             (int, optional)     starting frequency
+                    elevated            (bool, optional)    when True, add elevation to the Gaussian
+                    elevation           (float, optional)   magnitude of the elevation     
     Output:
                     ts_recovered        (ndarray)           recovered time series
                     recovered_tsFFT     (ndarray)           the recovered FFT of the time series (left side only)
     Note:
                     ts_recovered is not optimized
-                    recovered_tsFFT has errors of approximatly 10e-7 times the time series amplitude
     '''
     tablep = np.copy(table)
     length = tablep.shape[1]
-    vec = np.zeros(length)              
+    recovered_tsFFT = np.zeros(length, dtype='c8')              
     
     full_tsFFT = np.fft.fft(tablep[0])/_window_normal(length, 0)
 
     for i in range(tablep.shape[0]):              
-        vec_inv0 = np.fft.fft(tablep[i])[0]/_window_normal(length, i)[0]
-        vec[i] = vec_inv0
-
-    recovered_tsFFT = vec
+        recovered_tsFFT[i] = np.fft.fft(tablep[i])[0]/_window_normal(length, i, elevated=True, elevation = 10e-8)[0]
+ 
     recovered_ts = np.fft.ifft(recovered_tsFFT)*2
 
     return recovered_ts, recovered_tsFFT

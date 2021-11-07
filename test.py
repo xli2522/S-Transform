@@ -23,24 +23,38 @@ def test():
     # Generate a quadratic chirp signal
     dt = 0.0001
     rate = int(1/dt)
-    ts = np.linspace(0, 5, int(1/dt))
+    ts = np.linspace(0, 1, int(1/dt))
     
-    data = scipy.signal.chirp(ts, 10, 5, 300, method='quadratic')
+    data = scipy.signal.chirp(ts, 10, 1, 120, method='quadratic')
 
     # Compute S Transform Spectrogram
-    spectrogram = sTransform(data, sample_rate=rate)
+    spectrogram = sTransform(data, sample_rate=rate, frange=[0,500])
     plt.imshow(abs(spectrogram), origin='lower', aspect='auto')
     plt.title('Original Spectrogram')
     plt.show()
 
-    # Quick Recovery of ts from S Transform spectrogram
-    inverse_ts = recoverS(spectrogram)
-    plt.plot(inverse_ts-data)
+    # Quick Recovery of ts from S Transform 0 frequency row
+    recovered_ts = recoverS(spectrogram)
+    plt.plot(recovered_ts-data)
     plt.title('Time Series Reconstruction Error')
     plt.show()
 
     # Compute S Transform Spectrogram on the recovered time series
-    inverseSpectrogram = sTransform(inverse_ts, sample_rate=rate)
+    recoveredSpectrogram = sTransform(recovered_ts, sample_rate=rate, frange=[0,500])
+    plt.imshow(abs(recoveredSpectrogram), origin='lower', aspect='auto')
+    plt.title('Recovered Specctrogram')
+    plt.show()
+
+    # Quick Inverse of ts from S Transform
+    inverse_ts, inverse_tsFFT = inverseS(spectrogram)
+    plt.plot(inverse_ts)
+    plt.plot(inverse_ts-data)
+    plt.title('Time Series Reconstruction Error')
+    plt.legend(['Recovered ts', 'Error'])
+    plt.show()
+
+    # Compute S Transform Spectrogram on the recovered time series
+    inverseSpectrogram = sTransform(inverse_ts, sample_rate=rate, frange=[0,500])
     plt.imshow(abs(inverseSpectrogram), origin='lower', aspect='auto')
     plt.title('Recovered Specctrogram')
     plt.show()
