@@ -30,7 +30,7 @@ plt.title('Original Spectrogram')
 plt.show()
 ```
 
-![Original Spectrogram](https://github.com/xli2522/S-Transform/blob/master/img/original_spectrogram.png)
+![Original Spectrogram](https://github.com/xli2522/S-Transform/blob/main/img/original_spectrogram.png?raw=true)
 
 Step 3: Quick recovery of full ts from S transform * 0 frequency row*
 
@@ -44,7 +44,7 @@ plt.title('Time Series Reconstruction Error')
 plt.show()
 ```
 
-![Reconstruction Error](https://github.com/xli2522/S-Transform/blob/master/img/reconstruction_error.png)
+![Reconstruction Error](https://github.com/xli2522/S-Transform/blob/main/img/reconstruction_error.png?raw=true)
 
 Step 4: Recovered spectrogram:
 
@@ -56,7 +56,7 @@ plt.title('Recovered Specctrogram')
 plt.show()
 ```
 
-![Recovered](https://github.com/xli2522/S-Transform/blob/master/img/recovered_spectrogram.png)
+![Recovered](https://github.com/xli2522/S-Transform/blob/main/img/recovered_spectrogram.png?raw=true)
 
 Step 5: The real inverse S transform
 
@@ -70,7 +70,7 @@ plt.legend(['Recovered ts', 'Error'])
 plt.show()
 ```
 
-![Recovered ts and Error](https://github.com/xli2522/S-Transform/blob/master/img/recovered_ts_error.png)
+![Recovered ts and Error](https://github.com/xli2522/S-Transform/blob/main/img/recovered_ts_error.png?raw=true)
 
 Step 6: Recovered spectrogram on the *real* inverse S transform ts
 
@@ -82,5 +82,5 @@ plt.title('Recovered Specctrogram')
 plt.show()
 ```
 
-![Recovered Spectrogram](https://github.com/xli2522/S-Transform/blob/master/img/real_recovered_spectrogram.png)
+![Recovered Spectrogram](https://github.com/xli2522/S-Transform/blob/main/img/real_recovered_spectrogram.png?raw=true)
 
