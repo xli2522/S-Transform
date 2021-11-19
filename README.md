@@ -1,5 +1,8 @@
 Supported in: [![PyPI version](https://badge.fury.io/py/TFchirp.svg)](https://badge.fury.io/py/TFchirp)
 
+[Reference] R. G. Stockwell, L. Mansinha, and R. P. Lowe, Localization of the Complex Spectrum: The S Transform. IEEE 
+Transactions on Signal Processing, Vol. 44, No. 4, Apr. 1996
+
 ## S (Stockwell) Transform for Chirp Signals
 
 Step 1: Quadratic chirp signal
