@@ -59,7 +59,7 @@ def _window_normal(length, freq, factor = 1, elevated=True, elevation =10e-8):
     Note:
                     win                                     not your typical Gaussian => split + elevated (if True)
     '''
-    gauss = scipy.signal.gaussian(length,std=(freq)/(2*np.pi)*factor)
+    gauss = scipy.signal.gaussian(length,std=freq/(2*np.pi))*factor
     if elevated:
         elevated_gauss = np.where(gauss<elevation, elevation,gauss)
         win = np.hstack((elevated_gauss,elevated_gauss))[length//2:length//2+length]
