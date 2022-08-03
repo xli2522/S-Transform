@@ -104,13 +104,13 @@ def inverseS(table, lowFreq = 0, elevated=True, elevation =10e-8):
     '''
     tablep = np.copy(table)
     length = tablep.shape[1]
-    recovered_tsFFT = np.zeros(length, dtype='c8')              
+    recovered_tsFFT = np.zeros(length, dtype='c8')
     
-    full_tsFFT = np.fft.fft(tablep[0])/_window_normal(length, 0)
+    #full_tsFFT = np.fft.fft(tablep[0])/_window_normal(length, 0)
 
-    for i in range(tablep.shape[0]):              
-        recovered_tsFFT[i] = np.fft.fft(tablep[i])[0]/_window_normal(length, i, elevated=True, elevation = 10e-8)[0]
- 
+    for i in range(tablep.shape[0]):
+        recovered_tsFFT[i] = np.fft.fft(tablep[i])[0]
+        #/_window_normal(length, i, elevated=True, elevation = 10e-8)[0]
+
     recovered_ts = np.fft.ifft(recovered_tsFFT)*2
-
     return recovered_ts, recovered_tsFFT
