@@ -110,7 +110,7 @@ def inverseS(table, lowFreq = 0, elevated=True, elevation =10e-8):
 
     for i in range(tablep.shape[0]):
         recovered_tsFFT[i] = np.fft.fft(tablep[i])[0]
-        #/_window_normal(length, i, elevated=True, elevation = 10e-8)[0]
 
-    recovered_ts = np.fft.ifft(recovered_tsFFT)*2
+    recovered_ts = np.fft.ifft(recovered_tsFFT)*2       # due to the negative frequency
+                                                        # assuming the input is real
     return recovered_ts, recovered_tsFFT
