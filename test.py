@@ -40,7 +40,8 @@ def test():
     plt.show()
 
     # Compute S Transform Spectrogram on the recovered time series
-    recoveredSpectrogram = sTransform(recovered_ts, sample_rate=rate, frange=[0,500])
+    recoveredSpectrogram = sTransform(recovered_ts, 
+                                        sample_rate=rate, frange=[0,500])
     plt.imshow(abs(recoveredSpectrogram), origin='lower', aspect='auto')
     plt.title('Recovered Specctrogram')
     plt.show()
@@ -54,7 +55,8 @@ def test():
     plt.show()
 
     # Compute S Transform Spectrogram on the recovered time series
-    inverseSpectrogram = sTransform(inverse_ts, sample_rate=rate, frange=[0,500])
+    inverseSpectrogram = sTransform(inverse_ts, 
+                                        sample_rate=rate, frange=[0,500])
     plt.imshow(abs(inverseSpectrogram), origin='lower', aspect='auto')
     plt.title('Recovered Specctrogram')
     plt.show()
