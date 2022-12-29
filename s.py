@@ -61,7 +61,7 @@ def sTransform(ts, sample_rate, frange=[0, 500], frate = 1, downsample='none',
         if downsample < 2*number_freq:
             # perform the max allowed lower and higher frequency cut-off
             # note: np.fft.fft gives array (of complex values) with of length: 
-            # 2*ts_length;
+            # ts_length;
             pass
 
         else:
