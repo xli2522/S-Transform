@@ -80,7 +80,7 @@ def test():
                             sample_rate=len(recovered_ts)/len(data)*rate, 
                                                         frange=[0,500])
     plt.imshow(abs(inverseSpectrogram), origin='lower', aspect='auto')
-    plt.title('Recovered Specctrogram (inverseS)')
+    plt.title('Recovered Spectrogram (inverseS)')
     plt.show()
 
     return 

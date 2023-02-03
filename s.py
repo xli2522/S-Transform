@@ -55,9 +55,8 @@ def sTransform(ts, sample_rate, frange=[0, 500], frate = 1, downsample='none',
         downsampled_length = len(tsFFT)
         normalize_cut = 1
     elif isinstance(downsample, int):
-        tsFFT_positive = tsFFT[Nfreq[0]:Nfreq[1]]          # positive half
-        tsFFT_negative = tsFFT[-Nfreq[1]:len(tsFFT)
-                                            -Nfreq[0]]     # negative half
+        tsFFT_positive = tsFFT[:Nfreq[1]]                # positive half
+        tsFFT_negative = tsFFT[-Nfreq[1]:len(tsFFT)]     # negative half
         if downsample < 2*number_freq:
             # perform the max allowed lower and higher frequency cut-off
             # note: np.fft.fft gives array (of complex values) with of length: 
@@ -69,8 +68,8 @@ def sTransform(ts, sample_rate, frange=[0, 500], frate = 1, downsample='none',
             tsFFT_positive = np.concatenate((tsFFT_positive, 
                         np.zeros(downsample//2-number_freq)))  
             # 0 padding again
-            tsFFT_negative = np.concatenate((tsFFT_negative, 
-                        np.zeros(downsample//2-number_freq)))
+            tsFFT_negative = np.concatenate((np.zeros(
+                                    downsample//2-number_freq), tsFFT_negative))
 
         # connect high and low-passed coefficients
         tsFFT_cut = np.concatenate((tsFFT_positive, tsFFT_negative))
