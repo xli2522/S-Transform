@@ -55,7 +55,7 @@ Step 4: Recovered inverse S transform spectrogram
 # Compute S Transform Spectrogram on the recovered time series
 inverseSpectrogram = sTransform(inverse_ts, sample_rate=rate, frange=[0,500])
 plt.imshow(abs(inverseSpectrogram), origin='lower', aspect='auto')
-plt.title('Recovered Specctrogram')
+plt.title('Recovered Spectrogram')
 plt.show()
 ```
 
