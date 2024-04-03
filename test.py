@@ -38,21 +38,25 @@ def test():
 
     # Quick Inverse of ts from S Transform
     inverse_ts, inverse_tsFFT = inverseS(spectrogram)
+
+    # Magnitude Compensation: 
+    # with the assumption that ts is real and only positive freqs are kept
+    inverse_ts_comp = inverse_ts*2
+    # Plot the original signal and the recovered, magnitude compensated signal
     fig, axs = plt.subplots(2,1)
     axs[0].plot(data)
-    axs[1].plot(inverse_ts.real)
+    axs[1].plot(inverse_ts_comp.real)
     axs[0].set_title('Original Signal')
     axs[1].set_title('(inverseS) Freq-passed, down-sampled Signal')
     plt.show()
 
-    plt.plot(inverse_ts)
-    plt.plot(inverse_ts-data)
+    plt.plot(inverse_ts_comp)
+    plt.plot(inverse_ts_comp-data)
     plt.title('Time Series Reconstruction Error')
     plt.legend(['Recovered ts', 'Error'])
     plt.show()
 
     # Compute S Transform Spectrogram on the recovered time series
-    # IMPORTANT: the inverse transform itself is exact;
     # however, information could be lost in the forward ST due to downsampling
     # in both time and frequency
     inverseSpectrogram = sTransform(inverse_ts, 
