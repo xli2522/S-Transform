@@ -15,9 +15,9 @@ import scipy
 import matplotlib.pyplot as plt
 
 # Generate a quadratic chirp signal
-dt = 0.001
+dt = 0.001; t = 3
 rate = int(1/dt)
-ts = np.linspace(0, 1, int(1/dt))
+ts = np.linspace(0, t, int(1/dt))
 data = scipy.signal.chirp(ts, 10, 1, 120, method='quadratic')
 ```
 
@@ -27,9 +27,11 @@ Step 2: S Transform Spectrogram
 from s import *
 
 # Compute S Transform Spectrogram
-spectrogram = sTransform(data, sample_rate=rate)
+spectrogram = sTransform(data, sample_rate=rate, frate=rate/len(data),
+                                    downsample=None, frange=[0,500])
 plt.imshow(abs(spectrogram), origin='lower', aspect='auto')
 plt.title('Original Spectrogram')
+plt.colorbar()
 plt.show()
 ```
 
@@ -40,8 +42,19 @@ Step 3: The inverse S transform
 ```python
 # Quick Inverse of ts from S Transform
 inverse_ts, inverse_tsFFT = inverseS(spectrogram)
-plt.plot(inverse_ts)
-plt.plot(inverse_ts-data)
+
+# Magnitude Compensation: 
+# with the assumption that ts is real and only positive freqs are kept
+inverse_ts_comp = inverse_ts*2
+# Plot the original signal and the recovered, magnitude compensated signal
+fig, axs = plt.subplots(2,1)
+axs[0].plot(data)
+axs[1].plot(inverse_ts_comp.real)
+axs[0].set_title('Original Signal')
+axs[1].set_title('(inverseS) Freq-passed, down-sampled Signal')
+plt.show()
+plt.plot(inverse_ts_comp)
+plt.plot(inverse_ts_comp-data)
 plt.title('Time Series Reconstruction Error')
 plt.legend(['Recovered ts', 'Error'])
 plt.show()
@@ -53,9 +66,12 @@ Step 4: Recovered inverse S transform spectrogram
 
 ```python
 # Compute S Transform Spectrogram on the recovered time series
-inverseSpectrogram = sTransform(inverse_ts, sample_rate=rate, frange=[0,500])
+inverseSpectrogram = sTransform(inverse_ts, 
+                        sample_rate=len(inverse_ts)/len(data)*rate, 
+                                                    frange=[0,500])
 plt.imshow(abs(inverseSpectrogram), origin='lower', aspect='auto')
-plt.title('Recovered Spectrogram')
+plt.title('Recovered Spectrogram (inverseS)')
+plt.colorbar()
 plt.show()
 ```
 
