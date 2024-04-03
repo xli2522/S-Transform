@@ -32,6 +32,7 @@ def test():
                                         downsample=None, frange=[0,500])
     plt.imshow(abs(spectrogram), origin='lower', aspect='auto')
     plt.title('Original Spectrogram')
+    plt.colorbar()
     plt.show()
 
 
@@ -59,6 +60,7 @@ def test():
                                                         frange=[0,500])
     plt.imshow(abs(inverseSpectrogram), origin='lower', aspect='auto')
     plt.title('Recovered Spectrogram (inverseS)')
+    plt.colorbar()
     plt.show()
 
     return 

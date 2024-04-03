@@ -87,8 +87,9 @@ def sTransform( ts              : np.ndarray        ,
         normalize_cut = 1 - downsampled_length/length
 
     # prepare the stacked vector for the S Transform convolution operation
-    vec             : np.ndarray    = np.hstack((tsFFT_cut, tsFFT_cut))      
-
+    # vec             : np.ndarray    = np.hstack((tsFFT_cut, tsFFT_cut))      
+    vec             : np.ndarray    = tsFFT_cut
+    
     # spectrogram array container
     amp             : np.ndarray    = np.zeros((
         int(number_freq/_scaled_frate)+1,
@@ -171,6 +172,6 @@ def inverseS(   table       : np.ndarray,
     for i in range(tablep.shape[0]):
         recovered_tsFFT[i] = np.fft.fft(tablep[i])[0]
     
-    recovered_ts    : np.ndarray    = np.fft.ifft(recovered_tsFFT)*2       
+    recovered_ts    : np.ndarray    = np.fft.ifft(recovered_tsFFT)
 
     return recovered_ts, recovered_tsFFT
