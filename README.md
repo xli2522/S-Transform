@@ -1,7 +1,10 @@
 Supported in: [![PyPI version](https://badge.fury.io/py/TFchirp.svg)](https://badge.fury.io/py/TFchirp)
 
-[Reference] R. G. Stockwell, L. Mansinha, and R. P. Lowe, Localization of the Complex Spectrum: The S Transform. IEEE 
+[References] 
+- R. G. Stockwell, L. Mansinha, and R. P. Lowe, Localization of the Complex Spectrum: The S Transform. IEEE 
 Transactions on Signal Processing, Vol. 44, No. 4, Apr. 1996
+- Stockwell, RG (1999). S-transform analysis of gravity wave activity from a small scale network of airglow imagers. 
+PhD thesis, University of Western Ontario, London, Ontario, Canada.
 
 ## S (Stockwell) Transform for Chirp Signals
 
@@ -77,4 +80,5 @@ plt.show()
 
 ![Recovered Spectrogram](https://github.com/xli2522/S-Transform/blob/main/img/recovered_spectrogram.png?raw=true)
 
-![Downsampled Timeseries](https://github.com/xli2522/S-Transform/blob/main/img/original_downsampled_signals.png?raw=true)
+## One of the original copies of Dr. Stockwell's PhD thesis. 
+![Thesis](https://github.com/xli2522/S-Transform/blob/main/img/stockwell_thesis_small.jpg?raw=true)
