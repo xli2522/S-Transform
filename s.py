@@ -22,6 +22,7 @@ def sTransform( ts              : np.ndarray        ,
                 sample_rate     : Union[int, float] , 
                 frange          : Union[list]       = [0, 500]  , 
                 frate           : Union[int, float] = 1         , 
+                alpha           : int               = 1         ,
                 downsample      : Optional[int]     = None      
                 ) -> np.ndarray:
     
@@ -31,6 +32,7 @@ def sTransform( ts              : np.ndarray        ,
                 sample_rate         ts data sample rate
                 frange              frequency range (Hz)
                 frate               frequency sampling rate
+                alpha               window base width (base Gaussian dispersion)
                 downsample          down-sampled length in time
     Output:
                 amp                 spectrogram table
@@ -101,7 +103,7 @@ def sTransform( ts              : np.ndarray        ,
     for i in range(_scaled_frate, number_freq+1, _scaled_frate):                       
         amp[int(i/_scaled_frate)] = np.fft.ifft(
                     vec[Nfreq[0]+i:Nfreq[0]+i+downsampled_length]
-                    *_window_normal(downsampled_length, Nfreq[0]+i, 
+                    *_window_normal(downsampled_length, alpha+Nfreq[0]+i, 
                                     factor=1)*normalize_cut)
     
     return amp
