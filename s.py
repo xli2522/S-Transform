@@ -20,25 +20,29 @@ from typing import Union, Optional
 
 def sTransform( ts              : np.ndarray        , 
                 sample_rate     : Union[int, float] , 
-                frange          : Union[list]       = [0, 500]  , 
+                frange          : Union[list[int, int]]       = [0, 500]  , 
                 frate           : Union[int, float] = 1         , 
                 alpha           : int               = 1         ,
                 downsample      : Optional[int]     = None      
                 ) -> np.ndarray:
     
     '''Compute the S Transform of a time series data array
-    Input:
-                ts                  time series data
-                sample_rate         ts data sample rate
-                frange              frequency range (Hz)
-                frate               frequency sampling rate
-                alpha               window base width (base Gaussian dispersion)
-                downsample          down-sampled length in time
-    Output:
-                amp                 spectrogram table
+
+    Parameters
+    ----------
+    ts (np.ndarray)         : time series data array
+    sample_rate (int)       : sample rate of the time series
+    frange (list[int, int]) : frequency range to compute the S Transform
+    frate (int)             : frequency resolution of the S Transform
+    alpha (int)             : normalization factor for the Gaussian window
+    downsample (int)        : downsample factor for the S Transform
+
+    Returns
+    -------
+    amp (np.ndarray)        : S Transform spectrogram array
 
     NOTE:
-                amp                 has shape [frequency, time], lower -> higher
+    * The S Transform is computed using the inverse FFT
     '''
 
     length          : int           = len(ts)       # length of the input ts
@@ -113,17 +117,19 @@ def _window_normal( length       : int,
                     factor       : Union[int, float] = 1
                     ) -> np.ndarray:
     '''Splitted Gaussian window function for S Transform convolution
-    Input: 
-                length              length of the Gaussian window
-                freq                frequency at which this window 
-                                    is to be applied to
-                factor              normalizing factor of the Gaussian; 
-                                        default set to 1
-    Output:
-                win                 split gaussian window
+
+    Parameters
+    ----------
+    length (int)         : length of the Gaussian window
+    freq (int)           : frequency at which this window is to be applied to
+    factor (int, float)  : normalizing factor of the Gaussian; default set to 1
+
+    Returns
+    -------
+    win (np.ndarray)     : split gaussian window
+
     NOTE:
-                win                 not your typical Gaussian 
-                                    => splitted for S Transform convolution
+    win is not your typical Gaussian => splitted for S Transform convolution
     '''
     gauss       : np.ndarray    = scipy.signal.gaussian(
         length,std=freq/(2*np.pi))*factor
@@ -139,14 +145,18 @@ def recoverS(   table       : np.ndarray,
     Quick 'Perfect' Recovery of Time-Series from S Transform Spectrogram 
     Generated using sTransform
         
-    Input:
-                table               (ndarray)           spectrogram table
-                lowFreq             (int, optional)     starting frequency   
-    Output:
-                ts_recovered        (ndarray)           recovered time series
-    Note:
-                *only when [0] frequency row encodes 
-                    full time-series information
+    Parameters
+    ----------
+    table (np.ndarray)      : spectrogram table
+    lowFreq (int, optional) : starting frequency
+
+    Returns
+    -------
+    ts_recovered (np.ndarray) : recovered time series
+
+    NOTE:
+    * only when [0] frequency row encodes full time-series information
+    * lowFreq is not yet supported
     '''
     Warning('This function is deprecated. Useing inverseS() instead.')
 
@@ -156,17 +166,21 @@ def inverseS(   table       : np.ndarray,
                 lowFreq     : Optional[int] = None
                 ) -> tuple[np.ndarray, np.ndarray]:
     '''The True Inverse S Transform (without optimization)
-    Input:
-                table               spectrogram table
-                lowFreq             starting frequency
-    Output:
-                ts_recovered        recovered time series
-                recovered_tsFFT     the recovered FFT of 
-                                    the time series (left side only)
+    Parameters
+    ----------
+    table               : spectrogram table
+    lowFreq             : starting frequency
+    
+    Returns
+    -------
+    ts_recovered        : recovered time series
+    recovered_tsFFT     : the recovered FFT of the time series (left side only)
+
     NOTE:
-                ts_recovered is not yet optimized
-                lowFreq is not yet supported
+    * ts_recovered is not yet optimized
+    * lowFreq is not yet supported
     '''
+    
     tablep          : np.ndarray    = np.copy(table)
     length          : int           = tablep.shape[1]
     recovered_tsFFT : np.ndarray    = np.zeros(length, dtype='c8')
