@@ -20,9 +20,9 @@ from typing import Union, Optional
 
 def sTransform( ts              : np.ndarray        , 
                 sample_rate     : Union[int, float] , 
-                frange          : Union[list[int, int]]       = [0, 500]  , 
+                frange          : Union[list[int, int]] = [0, 500]  ,
                 frate           : Union[int, float] = 1         , 
-                alpha           : int               = 1         ,
+                alpha           : int               = 1         ,  
                 downsample      : Optional[int]     = None      
                 ) -> np.ndarray:
     
@@ -46,7 +46,7 @@ def sTransform( ts              : np.ndarray        ,
     '''
 
     length          : int           = len(ts)       # length of the input ts
-    Nfreq           : list[int, int]= [int(frange[0]*length/sample_rate), 
+    Nfreq           : list[int, int]= [ int(frange[0]*length/sample_rate), 
                                         int(frange[1]*length/sample_rate)]
     tsVal           : np.ndarray    = np.copy(ts)   # copy of the input ts
 
@@ -74,19 +74,21 @@ def sTransform( ts              : np.ndarray        ,
             pass
         else:
             # 0 padding to make up for the high and low-passed freq elements
-            tsFFT_positive          : np.ndarray= np.concatenate((
-                tsFFT_positive, 
-                np.zeros(downsample//2-number_freq)
-                ))  
+            tsFFT_positive          : np.ndarray= np.concatenate(
+                (tsFFT_positive, 
+                np.zeros(downsample//2-number_freq))
+                )  
 
-            tsFFT_negative          : np.ndarray= np.concatenate((
-                np.zeros(downsample//2-number_freq), 
-                tsFFT_negative
-                ))
+            tsFFT_negative          : np.ndarray= np.concatenate(
+                (np.zeros(downsample//2-number_freq), 
+                tsFFT_negative)
+                )
 
         # connect high and low-passed coefficients
         tsFFT_cut   : np.ndarray    = np.concatenate(
-            (tsFFT_positive, tsFFT_negative))
+            (tsFFT_positive, 
+             tsFFT_negative)
+            )
         downsampled_length          : int       = len(tsFFT_cut)
 
         # normalization factor
@@ -97,8 +99,8 @@ def sTransform( ts              : np.ndarray        ,
     vec             : np.ndarray    = tsFFT_cut
     
     # spectrogram array container
-    amp             : np.ndarray    = np.zeros((
-        int(number_freq/_scaled_frate)+1,
+    amp             : np.ndarray    = np.zeros(
+        (int(number_freq/_scaled_frate)+1,
         downsampled_length), 
         dtype='c8')
 
