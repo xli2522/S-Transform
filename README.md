@@ -14,25 +14,34 @@ Generate a quadratic chirp signal from 10 Hz to 120 Hz in 1 second with 10,000 s
 
 ```Python
 import numpy as np
-import scipy
 import matplotlib.pyplot as plt
+from scipy.signal import chirp
 
-# Generate a quadratic chirp signal
-dt = 0.001; t = 3
-rate = int(1/dt)
-ts = np.linspace(0, t, int(1/dt))
-data = scipy.signal.chirp(ts, 10, 1, 120, method='quadratic')
+# Time vector and sampling rate
+dt = 0.001
+t_end = 3.0
+fs = int(1.0 / dt)
+t = np.linspace(0, t_end, int(t_end * fs), endpoint=False)
+
+# Generate quadratic chirp signal
+x = chirp(t, f0=10.0, t1=t_end, f1=120.0, method='quadratic')
 ```
 
 Step 2: S Transform Spectrogram
 
 ```Python
-from s import *
+from s import s_transform, inverse_s_transform
 
-# Compute S Transform Spectrogram
-spectrogram = sTransform(data, sample_rate=rate, frate=rate/len(data),
-                                    downsample=None, frange=[0,500])
-plt.imshow(abs(spectrogram), origin='lower', aspect='auto')
+# Compute S-Transform spectrogram
+st = s_transform(
+    x,
+    sample_rate=fs,
+    freq_range=(0.0, 500.0),
+    freq_step=fs / x.size,
+    downsample=None
+)
+plt.figure()
+plt.imshow(np.abs(st), origin='lower', aspect='auto')
 plt.title('Original Spectrogram')
 plt.colorbar()
 plt.show()
@@ -43,23 +52,27 @@ plt.show()
 Step 3: The inverse S transform
 
 ```python
-# Quick Inverse of ts from S Transform
-inverse_ts, inverse_tsFFT = inverseS(spectrogram)
+# Inverse S-Transform
+x_rec, fft_rec = inverse_s_transform(st)
 
-# Magnitude Compensation: 
-# with the assumption that ts is real and only positive freqs are kept
-inverse_ts_comp = inverse_ts*2
-# Plot the original signal and the recovered, magnitude compensated signal
-fig, axs = plt.subplots(2,1)
-axs[0].plot(data)
-axs[1].plot(inverse_ts_comp.real)
-axs[0].set_title('Original Signal')
-axs[1].set_title('(inverseS) Freq-passed, down-sampled Signal')
+# Magnitude compensation (real signal, one-sided FFT)
+x_rec_comp = x_rec * 2.0
+
+# Plot original vs. recovered
+fig, axes = plt.subplots(2, 1, figsize=(8, 6))
+axes[0].plot(x)
+axes[0].set_title('Original Signal')
+axes[1].plot(x_rec_comp.real)
+axes[1].set_title('Recovered Signal (magnitude-compensated)')
+plt.tight_layout()
 plt.show()
-plt.plot(inverse_ts_comp)
-plt.plot(inverse_ts_comp-data)
+
+# Reconstruction error
+plt.figure()
+plt.plot(x_rec_comp.real, label='Recovered Signal')
+plt.plot(x - x_rec_comp.real, label='Error')
 plt.title('Time Series Reconstruction Error')
-plt.legend(['Recovered ts', 'Error'])
+plt.legend()
 plt.show()
 ```
 
@@ -68,12 +81,16 @@ plt.show()
 Step 4: Recovered inverse S transform spectrogram
 
 ```python
-# Compute S Transform Spectrogram on the recovered time series
-inverseSpectrogram = sTransform(inverse_ts, 
-                        sample_rate=len(inverse_ts)/len(data)*rate, 
-                                                    frange=[0,500])
-plt.imshow(abs(inverseSpectrogram), origin='lower', aspect='auto')
-plt.title('Recovered Spectrogram (inverseS)')
+# Spectrogram of recovered signal
+st_rec = s_transform(
+    x_rec.real,
+    sample_rate=fs,
+    freq_range=(0.0, 500.0),
+    freq_step=fs / x_rec.size
+)
+plt.figure()
+plt.imshow(np.abs(st_rec), origin='lower', aspect='auto')
+plt.title('Recovered Spectrogram')
 plt.colorbar()
 plt.show()
 ```
