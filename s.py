@@ -13,183 +13,138 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-import numpy            as np
-import scipy.signal
+import numpy as np
+from numpy.typing import ArrayLike, NDArray
+from typing import Optional, Sequence, Tuple
+from scipy import signal, fft
 
-from typing import Union, Optional
+__all__ = ["s_transform", "inverse_s_transform"]
 
-def sTransform( ts              : np.ndarray        , 
-                sample_rate     : Union[int, float] , 
-                frange          : Union[list[int, int]] = [0, 500]  ,
-                frate           : Union[int, float] = 1         , 
-                alpha           : int               = 1         ,  
-                downsample      : Optional[int]     = None      
-                ) -> np.ndarray:
-    
-    '''Compute the S Transform of a time series data array
+def s_transform(
+    ts: ArrayLike,
+    sample_rate: float,
+    freq_range: Sequence[float] = (0.0, 500.0),
+    freq_step: float = 1.0,
+    alpha: float = 1.0,
+    downsample: Optional[int] = None
+) -> NDArray[np.complex128]:
+    """
+    Compute the S Transform of a time series data array.
 
     Parameters
     ----------
-    ts (np.ndarray)         : time series data array
-    sample_rate (int)       : sample rate of the time series
-    frange (list[int, int]) : frequency range to compute the S Transform
-    frate (int)             : frequency resolution of the S Transform
-    alpha (int)             : normalization factor for the Gaussian window
-    downsample (int)        : downsample factor for the S Transform
+    ts : array_like
+        Time series data array.
+    sample_rate : float
+        Sample rate of the time series.
+    freq_range : sequence of float, optional
+        Frequency range to compute the S Transform, default is (0.0, 500.0).
+    freq_step : float, optional
+        Frequency resolution of the S Transform, default is 1.0.
+    alpha : float, optional
+        Normalization factor for the Gaussian window, default is 1.0.
+    downsample : int, optional
+        Downsample factor for the S Transform, default is None.
 
     Returns
     -------
-    amp (np.ndarray)        : S Transform spectrogram array
+    ndarray[complex]
+        S Transform spectrogram array.
 
-    NOTE:
-    * The S Transform is computed using the inverse FFT
-    '''
+    Notes
+    -----
+    The S Transform is computed using the inverse FFT.
+    """
+    ts_arr = np.asarray(ts, dtype=float)
+    n_samples = ts_arr.size
+    fmin, fmax = freq_range
+    n0 = int(fmin * n_samples / sample_rate)
+    n1 = int(fmax * n_samples / sample_rate)
+    n_bins = abs(n1 - n0)
+    step = int(np.ceil(freq_step * n_samples / sample_rate))
 
-    length          : int           = len(ts)       # length of the input ts
-    Nfreq           : list[int, int]= [ int(frange[0]*length/sample_rate), 
-                                        int(frange[1]*length/sample_rate)]
-    tsVal           : np.ndarray    = np.copy(ts)   # copy of the input ts
+    ts_fft = fft.fft(ts_arr)
 
-    # number of freq bins
-    number_freq     : int           = abs(int(Nfreq[1] - Nfreq[0]))  
-
-    _scaled_frate   : int           = int(np.ceil(frate*length/sample_rate)) 
-
-    # FFT of the original time series
-    tsFFT           : np.ndarray    = np.fft.fft(tsVal)
-
-    # time domain downsampling
-    if downsample   ==  None:
-        tsFFT_cut   : np.ndarray    = np.concatenate((tsFFT, tsFFT))
-        downsampled_length          : int       = len(tsFFT)
-        normalize_cut               : int       = 1
-
-    elif isinstance(downsample, int):
-        # positive half
-        tsFFT_positive              : np.ndarray= tsFFT[:Nfreq[1]]             
-        # negative half   
-        tsFFT_negative              : np.ndarray= tsFFT[-Nfreq[1]:len(tsFFT)]     
-        if downsample < 2*number_freq:
-            # perform the max allowed lower and higher frequency cut-off
+    if downsample is None:
+        ts_fft_cut = np.concatenate((ts_fft, ts_fft))
+        n_cut = ts_fft.size
+        norm = 1.0
+    else:
+        ts_fft_pos = ts_fft[:n1]
+        ts_fft_neg = ts_fft[-n1:]
+        if downsample < 2 * n_bins:
+            # max allowed lower/higher freq cut-off
             pass
         else:
-            # 0 padding to make up for the high and low-passed freq elements
-            tsFFT_positive          : np.ndarray= np.concatenate(
-                (tsFFT_positive, 
-                np.zeros(downsample//2-number_freq))
-                )  
+            pad_len = downsample // 2 - n_bins
+            ts_fft_pos = np.concatenate((ts_fft_pos, np.zeros(pad_len)))
+            ts_fft_neg = np.concatenate((np.zeros(pad_len), ts_fft_neg))
+        ts_fft_cut = np.concatenate((ts_fft_pos, ts_fft_neg))
+        n_cut = ts_fft_cut.size
+        norm = 1.0 - n_cut / n_samples
 
-            tsFFT_negative          : np.ndarray= np.concatenate(
-                (np.zeros(downsample//2-number_freq), 
-                tsFFT_negative)
-                )
+    ST = np.zeros((int(n_bins / step) + 1, n_cut), dtype=np.complex128)
+    vec = ts_fft_cut
 
-        # connect high and low-passed coefficients
-        tsFFT_cut   : np.ndarray    = np.concatenate(
-            (tsFFT_positive, 
-             tsFFT_negative)
-            )
-        downsampled_length          : int       = len(tsFFT_cut)
+    for i in range(step, n_bins + 1, step):
+        window = _window_normal(n_cut, alpha + n0 + i)
+        segment = vec[n0 + i : n0 + i + n_cut]
+        ST[int(i / step)] = fft.ifft(segment * window * norm)
 
-        # normalization factor
-        normalize_cut = 1 - downsampled_length/length
+    return ST
 
-    # prepare the stacked vector for the S Transform convolution operation
-    # vec             : np.ndarray    = np.hstack((tsFFT_cut, tsFFT_cut))      
-    vec             : np.ndarray    = tsFFT_cut
-    
-    # spectrogram array container
-    amp             : np.ndarray    = np.zeros(
-        (int(number_freq/_scaled_frate)+1,
-        downsampled_length), 
-        dtype='c8')
 
-    # convolution operation
-    # for each frequency bin, perform the inverse FFT
-    for i in range(_scaled_frate, number_freq+1, _scaled_frate):                       
-        amp[int(i/_scaled_frate)] = np.fft.ifft(
-                    vec[Nfreq[0]+i:Nfreq[0]+i+downsampled_length]
-                    *_window_normal(downsampled_length, alpha+Nfreq[0]+i, 
-                                    factor=1)*normalize_cut)
-    
-    return amp
-
-def _window_normal( length       : int, 
-                    freq         : int, 
-                    factor       : Union[int, float] = 1
-                    ) -> np.ndarray:
-    '''Splitted Gaussian window function for S Transform convolution
+def _window_normal(
+    length: int,
+    freq: float,
+    factor: float = 1.0
+) -> NDArray[np.float64]:
+    """
+    Generate a split Gaussian window for S Transform convolution.
 
     Parameters
     ----------
-    length (int)         : length of the Gaussian window
-    freq (int)           : frequency at which this window is to be applied to
-    factor (int, float)  : normalizing factor of the Gaussian; default set to 1
+    length : int
+        Length of the Gaussian window.
+    freq : float
+        Frequency at which this window is applied.
+    factor : float, optional
+        Normalizing factor for the Gaussian, default is 1.0.
 
     Returns
     -------
-    win (np.ndarray)     : split gaussian window
+    ndarray[float]
+        Split Gaussian window.
+    """
+    gauss = signal.windows.gaussian(length, std=freq / (2 * np.pi)) * factor
+    return np.hstack((gauss, gauss))[length // 2 : length // 2 + length]
 
-    NOTE:
-    win is not your typical Gaussian => splitted for S Transform convolution
-    '''
-    gauss       : np.ndarray    = scipy.signal.gaussian(
-        length,std=freq/(2*np.pi))*factor
-    
-    return np.hstack((gauss,gauss))[length//2:length//2+length]
+def inverse_s_transform(
+    table: ArrayLike,
+    low_freq: Optional[int] = None
+) -> Tuple[NDArray[np.complex128], NDArray[np.complex128]]:
+    """
+    Perform the True Inverse S Transform.
 
-def recoverS(   table       : np.ndarray, 
-                lowFreq     : Optional[int] = None
-                ) -> np.ndarray:
-    '''[Deprecated: uses inverseS() instead]
-
-    Original Function Information:
-    Quick 'Perfect' Recovery of Time-Series from S Transform Spectrogram 
-    Generated using sTransform
-        
     Parameters
     ----------
-    table (np.ndarray)      : spectrogram table
-    lowFreq (int, optional) : starting frequency
+    table : array_like
+        Spectrogram table generated using `s_transform`.
+    low_freq : int, optional
+        Starting frequency (not yet supported).
 
     Returns
     -------
-    ts_recovered (np.ndarray) : recovered time series
+    tuple of
+        - ndarray[complex]: Recovered time series.
+        - ndarray[complex]: Recovered FFT (one-sided).
+    """
+    T = np.asarray(table, dtype=np.complex128)
+    n_freq, n_time = T.shape
+    fft_rec = np.zeros(n_time, dtype=np.complex128)
 
-    NOTE:
-    * only when [0] frequency row encodes full time-series information
-    * lowFreq is not yet supported
-    '''
-    Warning('This function is deprecated. Useing inverseS() instead.')
+    for idx in range(n_freq):
+        fft_rec[idx] = fft.fft(T[idx])[0]
 
-    return inverseS(table, lowFreq)
-
-def inverseS(   table       : np.ndarray, 
-                lowFreq     : Optional[int] = None
-                ) -> tuple[np.ndarray, np.ndarray]:
-    '''The True Inverse S Transform (without optimization)
-    Parameters
-    ----------
-    table               : spectrogram table
-    lowFreq             : starting frequency
-    
-    Returns
-    -------
-    ts_recovered        : recovered time series
-    recovered_tsFFT     : the recovered FFT of the time series (left side only)
-
-    NOTE:
-    * ts_recovered is not yet optimized
-    * lowFreq is not yet supported
-    '''
-    
-    tablep          : np.ndarray    = np.copy(table)
-    length          : int           = tablep.shape[1]
-    recovered_tsFFT : np.ndarray    = np.zeros(length, dtype='c8')
-
-    for i in range(tablep.shape[0]):
-        recovered_tsFFT[i] = np.fft.fft(tablep[i])[0]
-    
-    recovered_ts    : np.ndarray    = np.fft.ifft(recovered_tsFFT)
-
-    return recovered_ts, recovered_tsFFT
+    ts_rec = fft.ifft(fft_rec)
+    return ts_rec, fft_rec

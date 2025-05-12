@@ -13,61 +13,74 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-import  numpy                as np
-import  scipy
-import  matplotlib.pyplot    as plt
-from    s import *
+import numpy as np
+import matplotlib.pyplot as plt
+from scipy.signal import chirp
+from s import s_transform, inverse_s_transform
 
-def test():
+def test_s_transform():
+    """
+    Test the S-Transform and its inverse on a quadratic chirp signal.
+    """
+    # Time vector and sampling rate
+    dt = 0.001
+    t_end = 3.0
+    fs = int(1.0 / dt)
+    t = np.linspace(0, t_end, int(t_end * fs), endpoint=False)
 
-    # Generate a quadratic chirp signal
-    dt = 0.001; t = 3
-    rate = int(1/dt)
-    ts = np.linspace(0, t, int(t/dt))
-    
-    data = scipy.signal.chirp(ts, 10, t, 120, method='quadratic')
+    # Generate quadratic chirp signal
+    x = chirp(t, f0=10.0, t1=t_end, f1=120.0, method='quadratic')
 
-    # Compute S Transform Spectrogram
-    spectrogram = sTransform(data, sample_rate=rate, frate=rate/len(data),
-                                        downsample=None, frange=[0,500])
-    plt.imshow(abs(spectrogram), origin='lower', aspect='auto')
+    # Compute S-Transform spectrogram
+    st = s_transform(
+        x,
+        sample_rate=fs,
+        freq_range=(0.0, 500.0),
+        freq_step=fs / x.size,
+        downsample=None
+    )
+    plt.figure()
+    plt.imshow(np.abs(st), origin='lower', aspect='auto')
     plt.title('Original Spectrogram')
     plt.colorbar()
     plt.show()
 
+    # Inverse S-Transform
+    x_rec, fft_rec = inverse_s_transform(st)
 
-    # Quick Inverse of ts from S Transform
-    inverse_ts, inverse_tsFFT = inverseS(spectrogram)
+    # Magnitude compensation (real signal, one-sided FFT)
+    x_rec_comp = x_rec * 2.0
 
-    # Magnitude Compensation: 
-    # with the assumption that ts is real and only positive freqs are kept
-    inverse_ts_comp = inverse_ts*2
-    # Plot the original signal and the recovered, magnitude compensated signal
-    fig, axs = plt.subplots(2,1)
-    axs[0].plot(data)
-    axs[1].plot(inverse_ts_comp.real)
-    axs[0].set_title('Original Signal')
-    axs[1].set_title('(inverseS) Freq-passed, down-sampled Signal')
+    # Plot original vs. recovered
+    fig, axes = plt.subplots(2, 1, figsize=(8, 6))
+    axes[0].plot(x)
+    axes[0].set_title('Original Signal')
+    axes[1].plot(x_rec_comp.real)
+    axes[1].set_title('Recovered Signal (magnitude-compensated)')
+    plt.tight_layout()
     plt.show()
 
-    plt.plot(inverse_ts_comp)
-    plt.plot(inverse_ts_comp-data)
+    # Reconstruction error
+    plt.figure()
+    plt.plot(x_rec_comp.real, label='Recovered Signal')
+    plt.plot(x - x_rec_comp.real, label='Error')
     plt.title('Time Series Reconstruction Error')
-    plt.legend(['Recovered ts', 'Error'])
+    plt.legend()
     plt.show()
 
-    # Compute S Transform Spectrogram on the recovered time series
-    # however, information could be lost in the forward ST due to downsampling
-    # in both time and frequency
-    inverseSpectrogram = sTransform(inverse_ts, 
-                            sample_rate=len(inverse_ts)/len(data)*rate, 
-                                                        frange=[0,500])
-    plt.imshow(abs(inverseSpectrogram), origin='lower', aspect='auto')
-    plt.title('Recovered Spectrogram (inverseS)')
+    # Spectrogram of recovered signal
+    st_rec = s_transform(
+        x_rec.real,
+        sample_rate=fs,
+        freq_range=(0.0, 500.0),
+        freq_step=fs / x_rec.size
+    )
+    plt.figure()
+    plt.imshow(np.abs(st_rec), origin='lower', aspect='auto')
+    plt.title('Recovered Spectrogram')
     plt.colorbar()
     plt.show()
 
-    return 
 
 if __name__ == '__main__':
-    test()
+    test_s_transform()
