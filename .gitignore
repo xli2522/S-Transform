@@ -1,3 +1,6 @@
+# Custom dev files
+playground.py
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]

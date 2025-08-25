@@ -17,6 +17,7 @@ import numpy as np
 from numpy.typing import ArrayLike, NDArray
 from typing import Optional, Sequence, Tuple
 from scipy import signal, fft
+import warnings
 
 __all__ = ["s_transform", "inverse_s_transform"]
 
@@ -27,7 +28,7 @@ def s_transform(
     freq_step: float = 1.0,
     alpha: float = 1.0,
     downsample: Optional[int] = None
-) -> NDArray[np.complex128]:
+) -> Optional[NDArray[np.complex128]]:
     """
     Compute the S Transform of a time series data array.
 
@@ -62,11 +63,10 @@ def s_transform(
     n1 = int(fmax * n_samples / sample_rate)
     n_bins = abs(n1 - n0)
     step = int(np.ceil(freq_step * n_samples / sample_rate))
-
     ts_fft = fft.fft(ts_arr)
 
     if downsample is None:
-        ts_fft_cut = np.concatenate((ts_fft, ts_fft))
+        ts_fft_cut = np.concatenate([ts_fft, ts_fft])
         n_cut = ts_fft.size
         norm = 1.0
     else:
@@ -74,13 +74,14 @@ def s_transform(
         ts_fft_neg = ts_fft[-n1:]
         if downsample < 2 * n_bins:
             # max allowed lower/higher freq cut-off
-            pass
-        else:
-            pad_len = downsample // 2 - n_bins
-            ts_fft_pos = np.concatenate((ts_fft_pos, np.zeros(pad_len)))
-            ts_fft_neg = np.concatenate((np.zeros(pad_len), ts_fft_neg))
-        ts_fft_cut = np.concatenate((ts_fft_pos, ts_fft_neg))
-        n_cut = ts_fft_cut.size
+            warnings.warn("Hit Nyquist Criterion Limit. Returning None.")
+            return None
+        
+        pad_len = downsample // 2 - n_bins
+        ts_fft_pos = np.concatenate([ts_fft_pos, np.zeros(pad_len)])
+        ts_fft_neg = np.concatenate([np.zeros(pad_len), ts_fft_neg])
+        ts_fft_cut = np.concatenate([ts_fft_pos, ts_fft_neg, ts_fft_pos, ts_fft_neg])
+        n_cut = ts_fft_pos.size + ts_fft_neg.size          # where the window shape is wrong
         norm = 1.0 - n_cut / n_samples
 
     ST = np.zeros((int(n_bins / step) + 1, n_cut), dtype=np.complex128)
