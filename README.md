@@ -1,3 +1,5 @@
+
+
 Supported in: [![PyPI version](https://badge.fury.io/py/TFchirp.svg)](https://badge.fury.io/py/TFchirp)
 
 [References] 
@@ -10,7 +12,7 @@ PhD thesis, University of Western Ontario, London, Ontario, Canada.
 
 Step 1: Quadratic chirp signal
 
-Generate a quadratic chirp signal from 10 Hz to 120 Hz in 1 second with 10,000 sampling points.
+Generate a quadratic chirp signal from 10 Hz to 120 Hz in 3 seconds with 3,000 sampling points.
 
 ```Python
 import numpy as np
