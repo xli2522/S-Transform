@@ -13,10 +13,15 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+from pathlib import Path
+
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.signal import chirp
 from s import s_transform, inverse_s_transform
+
+
+IMAGE_DIR = Path(__file__).with_name("img")
 
 def test_s_transform():
     """
@@ -35,15 +40,22 @@ def test_s_transform():
     st = s_transform(
         x,
         sample_rate=fs,
-        freq_range=(0, 300),
-        freq_step=fs / x.size,
-        downsample=None,
     )
-    plt.figure()
-    plt.imshow(np.abs(st), origin='lower', aspect='auto')
-    plt.title('Original Spectrogram')
-    plt.colorbar()
+    display_mask = st.frequencies <= 300.0
+    fig, axis = plt.subplots(figsize=(8, 5))
+    image = axis.imshow(
+        np.abs(np.asarray(st)[display_mask]),
+        origin='lower',
+        aspect='auto',
+    )
+    axis.set_title('Original Spectrogram (0–300 Hz)')
+    axis.set_xlabel('Time samples')
+    axis.set_ylabel('Frequency bins')
+    fig.colorbar(image, ax=axis, label='Magnitude')
+    fig.tight_layout()
+    fig.savefig(IMAGE_DIR / 'original_spectrogram.png', dpi=150)
     plt.show()
+    plt.close(fig)
 
     # Inverse S-Transform
     x_rec, fft_rec = inverse_s_transform(st)
@@ -62,12 +74,16 @@ def test_s_transform():
     plt.show()
 
     # Reconstruction error
-    plt.figure()
-    plt.plot(x_rec_comp, label='Recovered Signal')
-    plt.plot(x - x_rec_comp, label='Error')
-    plt.title('Time Series Reconstruction Error')
-    plt.legend()
+    fig, axis = plt.subplots(figsize=(8, 4))
+    axis.plot(x_rec_comp, label='Recovered Signal')
+    axis.plot(x - x_rec_comp, label='Error')
+    axis.set_title('Time Series Reconstruction Error')
+    axis.set_xlabel('Time samples')
+    axis.legend()
+    fig.tight_layout()
+    fig.savefig(IMAGE_DIR / 'recovered_ts_error.png', dpi=150)
     plt.show()
+    plt.close(fig)
 
     # Spectrogram of recovered signal
     st_rec = s_transform(
@@ -76,11 +92,16 @@ def test_s_transform():
         freq_range=(0.0, 500.0),
         freq_step=fs / x_rec.size
     )
-    plt.figure()
-    plt.imshow(np.abs(st_rec), origin='lower', aspect='auto')
-    plt.title('Recovered Spectrogram')
-    plt.colorbar()
+    fig, axis = plt.subplots(figsize=(8, 5))
+    image = axis.imshow(np.abs(st_rec), origin='lower', aspect='auto')
+    axis.set_title('Recovered Spectrogram')
+    axis.set_xlabel('Time samples')
+    axis.set_ylabel('Frequency bins')
+    fig.colorbar(image, ax=axis, label='Magnitude')
+    fig.tight_layout()
+    fig.savefig(IMAGE_DIR / 'recovered_spectrogram.png', dpi=150)
     plt.show()
+    plt.close(fig)
 
 
 if __name__ == '__main__':
