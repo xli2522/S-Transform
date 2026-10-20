@@ -1,4 +1,5 @@
 # S-Transform for Python
+Supported in: [![PyPI version](https://badge.fury.io/py/TFchirp.svg)](https://badge.fury.io/py/TFchirp)
 
 This repository provides a NumPy/SciPy implementation of the discrete
 Stockwell (S) transform for one-dimensional signals.
@@ -97,3 +98,8 @@ intentional.
 ![Original spectrogram](img/original_spectrogram.png)
 
 ![Recovered signal and error](img/recovered_ts_error.png)
+
+## Reference material
+
+## One of the original copies of Dr. Stockwell's PhD thesis.
+![Thesis](https://github.com/xli2522/S-Transform/blob/main/img/stockwell_thesis_small.jpg?raw=true)
