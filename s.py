@@ -12,8 +12,9 @@
 
 """Discrete Stockwell (S) transform utilities.
 
-The forward transform returns positive-frequency rows. When the input is real
-and the complete positive-frequency range is requested, the inverse can
+The forward transform returns rows for the requested FFT frequencies. By
+default this is the canonical nonnegative range. When the input is real and
+the complete positive-frequency range is requested, the inverse can
 reconstruct the original signal by restoring conjugate negative-frequency
 bins.
 """
@@ -83,7 +84,17 @@ class STransformArray(np.ndarray):
     def frequencies(self) -> NDArray[np.float64]:
         """Actual frequency represented by each transform row, in hertz."""
         self._require_metadata()
-        return self.frequency_indices * self.sample_rate / self.input_length
+        return self.signed_frequency_indices * self.sample_rate / self.input_length
+
+    @property
+    def signed_frequency_indices(self) -> NDArray[np.int64]:
+        """Signed FFT-bin indices represented by each transform row."""
+        self._require_metadata()
+        return np.where(
+            self.frequency_indices <= self.input_length // 2,
+            self.frequency_indices,
+            self.frequency_indices - self.input_length,
+        )
 
     @property
     def times(self) -> NDArray[np.float64]:
@@ -134,9 +145,10 @@ def _validate_input(
 
     if not np.isfinite(fmin) or not np.isfinite(fmax):
         raise ValueError("freq_range values must be finite")
-    if fmin < 0 or fmax > nyquist or fmin >= fmax:
+    if fmin < -nyquist or fmax > nyquist or fmin >= fmax:
         raise ValueError(
-            f"freq_range must satisfy 0 <= fmin < fmax <= Nyquist ({nyquist:g} Hz)"
+            f"freq_range must satisfy -Nyquist <= fmin < fmax <= Nyquist "
+            f"({nyquist:g} Hz)"
         )
 
     if freq_step is None:
@@ -225,7 +237,7 @@ def s_transform(
     downsample: Optional[int] = None,
     max_output_elements: Optional[int] = 20_000_000,
 ) -> STransformArray:
-    """Compute the positive-frequency discrete Stockwell transform.
+    """Compute the discrete Stockwell transform over a signed frequency range.
 
     Parameters
     ----------
@@ -234,7 +246,8 @@ def s_transform(
     sample_rate : float
         Sample rate in hertz.
     freq_range : sequence of float, optional
-        Positive-frequency range in hertz. The default is ``(0, Nyquist)``.
+        Signed frequency range in hertz. The default is ``(0, Nyquist)``;
+        negative values select negative-frequency FFT bins.
     freq_step : float, optional
         Requested frequency spacing in hertz. The actual spacing is rounded
         up to an integer number of FFT bins. The default is one FFT bin.
@@ -253,7 +266,8 @@ def s_transform(
     -------
     STransformArray
         Complex array of shape ``(n_frequencies, n_time)``. The returned array
-        exposes ``frequency_indices``, ``frequencies``, ``times``,
+        exposes ``frequency_indices``, ``signed_frequency_indices``,
+        ``frequencies``, ``times``,
         ``sample_rate``, ``input_length`` and ``real_input`` metadata.
     """
     ts_arr, sample_rate, fmin, fmax, freq_step, downsample = _validate_input(
@@ -263,14 +277,28 @@ def s_transform(
     frequency_resolution = sample_rate / n_samples
     max_bin = n_samples // 2
 
-    # Use bins wholly inside the requested range. A requested spacing below
-    # one FFT bin is represented by the finest available spacing.
-    start_bin = max(0, int(np.ceil(fmin / frequency_resolution - 1e-12)))
-    stop_bin = min(max_bin, int(np.floor(fmax / frequency_resolution + 1e-12)))
+    # Use canonical signed bins. For even lengths, the Nyquist bin has only
+    # one representation and is assigned the positive sign.
+    min_signed_bin = -((n_samples - 1) // 2)
+    max_signed_bin = n_samples // 2
+    start_bin = max(
+        min_signed_bin,
+        int(np.ceil(fmin / frequency_resolution - 1e-12)),
+    )
+    stop_bin = min(
+        max_signed_bin,
+        int(np.floor(fmax / frequency_resolution + 1e-12)),
+    )
     if start_bin > stop_bin:
         raise ValueError("freq_range does not contain an available FFT bin")
     step_bins = max(1, int(np.ceil(freq_step / frequency_resolution - 1e-12)))
-    frequency_indices = np.arange(start_bin, stop_bin + 1, step_bins, dtype=np.int64)
+    signed_frequency_indices = np.arange(
+        start_bin,
+        stop_bin + 1,
+        step_bins,
+        dtype=np.int64,
+    )
+    frequency_indices = np.mod(signed_frequency_indices, n_samples)
 
     if max_output_elements is not None:
         max_output_elements = _as_integer_scalar(
@@ -301,12 +329,17 @@ def s_transform(
             # The zero-frequency S-transform row is the signal mean.
             row = np.full(n_samples, spectrum[0] / n_samples, dtype=np.complex128)
         else:
+            signed_frequency_index = (
+                frequency_index
+                if frequency_index <= max_bin
+                else frequency_index - n_samples
+            )
             shifted_spectrum = spectrum[
                 (frequency_index + np.arange(n_samples, dtype=np.int64)) % n_samples
             ]
             window = _window_normal(
                 n_samples,
-                frequency_index / alpha,
+                abs(signed_frequency_index) / alpha,
             )
             row = fft.ifft(shifted_spectrum * window)
         if output_length == n_samples:

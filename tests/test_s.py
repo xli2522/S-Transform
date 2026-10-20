@@ -42,6 +42,37 @@ def test_frequency_step_preserves_actual_fft_bin_indices():
     np.testing.assert_allclose(np.fft.fft(transform[1])[0], -16j, atol=1e-10)
 
 
+def test_signed_frequency_range_round_trips_complex_signal():
+    n_samples = 32
+    sample_rate = 32.0
+    sample_indices = np.arange(n_samples)
+    x = np.exp(-2j * np.pi * 5 * sample_indices / n_samples)
+
+    transform = s_transform(
+        x,
+        sample_rate=sample_rate,
+        freq_range=(-sample_rate / 2, sample_rate / 2),
+    )
+    recovered, recovered_spectrum = inverse_s_transform(transform)
+
+    np.testing.assert_allclose(
+        transform.frequencies,
+        np.arange(-15, 17, dtype=float),
+    )
+    np.testing.assert_array_equal(
+        transform.signed_frequency_indices,
+        np.arange(-15, 17),
+    )
+    negative_row = np.flatnonzero(np.isclose(transform.frequencies, -5.0))[0]
+    np.testing.assert_allclose(
+        np.fft.fft(transform[negative_row])[0],
+        np.fft.fft(x)[-5],
+        atol=1e-10,
+    )
+    np.testing.assert_allclose(recovered, x, atol=1e-10)
+    np.testing.assert_allclose(recovered_spectrum[-5], n_samples, atol=1e-10)
+
+
 def test_odd_downsample_is_supported_and_metadata_survives_inverse():
     x = np.sin(2 * np.pi * np.arange(32) / 32)
     transform = s_transform(x, sample_rate=32, downsample=15)
@@ -57,7 +88,7 @@ def test_odd_downsample_is_supported_and_metadata_survives_inverse():
     [
         {"sample_rate": 0},
         {"sample_rate": 16, "freq_step": 0},
-        {"sample_rate": 16, "freq_range": (-1, 8)},
+        {"sample_rate": 16, "freq_range": (-9, 8)},
         {"sample_rate": 16, "freq_range": (0, 9)},
         {"sample_rate": 16, "downsample": 0},
     ],

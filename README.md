@@ -45,7 +45,21 @@ plt.show()
 The default transform uses every FFT bin from zero through Nyquist. The
 actual frequency represented by each row is available as `st.frequencies`.
 If `freq_step` is supplied, it is rounded up to an integer number of FFT bins;
-the selected bins are available as `st.frequency_indices`.
+the selected modulo-`N` FFT bins are available as `st.frequency_indices`, while
+`st.signed_frequency_indices` exposes their signed mathematical indices.
+
+For complex signals with negative-frequency content, request the signed range
+explicitly. The canonical FFT ordering uses the positive Nyquist bin for even
+lengths and represents all other negative bins with signed frequencies:
+
+```python
+st = s_transform(
+    x,
+    sample_rate=sample_rate,
+    freq_range=(-sample_rate / 2, sample_rate / 2),
+)
+x_recovered, _ = inverse_s_transform(st)
+```
 
 ## Inversion
 
