@@ -13,10 +13,37 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+import os
+import tempfile
+from pathlib import Path
+
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.signal import chirp
 from s import s_transform, inverse_s_transform
+
+
+IMAGE_DIR = Path(__file__).with_name("img")
+
+
+def _save_figure_atomically(figure, output_path: Path, *, dpi: int = 150) -> None:
+    """Render a figure privately, then publish the complete image atomically."""
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    temporary_path = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            dir=output_path.parent,
+            prefix=f".{output_path.stem}-",
+            suffix=output_path.suffix,
+            delete=False,
+        ) as temporary_file:
+            temporary_path = Path(temporary_file.name)
+        figure.savefig(temporary_path, dpi=dpi)
+        os.replace(temporary_path, output_path)
+    finally:
+        if temporary_path is not None:
+            temporary_path.unlink(missing_ok=True)
+
 
 def test_s_transform():
     """
@@ -35,15 +62,26 @@ def test_s_transform():
     st = s_transform(
         x,
         sample_rate=fs,
-        freq_range=(0, 300),
-        freq_step=fs / x.size,
-        downsample=None,
     )
-    plt.figure()
-    plt.imshow(np.abs(st), origin='lower', aspect='auto')
-    plt.title('Original Spectrogram')
-    plt.colorbar()
+    display_mask = st.frequencies <= 300.0
+    fig, axis = plt.subplots(figsize=(8, 5))
+    image = axis.pcolormesh(
+        st.times,
+        st.frequencies[display_mask],
+        np.abs(np.asarray(st)[display_mask]),
+        shading='auto',
+    )
+    axis.set_title('Original Spectrogram (0–300 Hz)')
+    axis.set_xlabel('Time (s)')
+    axis.set_ylabel('Frequency (Hz)')
+    fig.colorbar(image, ax=axis, label='Magnitude')
+    fig.tight_layout()
+    _save_figure_atomically(
+        fig,
+        IMAGE_DIR / 'original_spectrogram.png',
+    )
     plt.show()
+    plt.close(fig)
 
     # Inverse S-Transform
     x_rec, fft_rec = inverse_s_transform(st)
@@ -54,20 +92,28 @@ def test_s_transform():
 
     # Plot original vs. recovered
     fig, axes = plt.subplots(2, 1, figsize=(8, 6))
-    axes[0].plot(x)
+    axes[0].plot(t, x)
     axes[0].set_title('Original Signal')
-    axes[1].plot(x_rec_comp)
+    axes[1].plot(t, x_rec_comp)
     axes[1].set_title('Recovered Signal')
+    axes[1].set_xlabel('Time (s)')
     plt.tight_layout()
     plt.show()
 
     # Reconstruction error
-    plt.figure()
-    plt.plot(x_rec_comp, label='Recovered Signal')
-    plt.plot(x - x_rec_comp, label='Error')
-    plt.title('Time Series Reconstruction Error')
-    plt.legend()
+    fig, axis = plt.subplots(figsize=(8, 4))
+    axis.plot(t, x_rec_comp, label='Recovered Signal')
+    axis.plot(t, x - x_rec_comp, label='Error')
+    axis.set_title('Time Series Reconstruction Error')
+    axis.set_xlabel('Time (s)')
+    axis.legend()
+    fig.tight_layout()
+    _save_figure_atomically(
+        fig,
+        IMAGE_DIR / 'recovered_ts_error.png',
+    )
     plt.show()
+    plt.close(fig)
 
     # Spectrogram of recovered signal
     st_rec = s_transform(
@@ -76,11 +122,24 @@ def test_s_transform():
         freq_range=(0.0, 500.0),
         freq_step=fs / x_rec.size
     )
-    plt.figure()
-    plt.imshow(np.abs(st_rec), origin='lower', aspect='auto')
-    plt.title('Recovered Spectrogram')
-    plt.colorbar()
+    fig, axis = plt.subplots(figsize=(8, 5))
+    image = axis.pcolormesh(
+        st_rec.times,
+        st_rec.frequencies,
+        np.abs(np.asarray(st_rec)),
+        shading='auto',
+    )
+    axis.set_title('Recovered Spectrogram')
+    axis.set_xlabel('Time (s)')
+    axis.set_ylabel('Frequency (Hz)')
+    fig.colorbar(image, ax=axis, label='Magnitude')
+    fig.tight_layout()
+    _save_figure_atomically(
+        fig,
+        IMAGE_DIR / 'recovered_spectrogram.png',
+    )
     plt.show()
+    plt.close(fig)
 
 
 if __name__ == '__main__':

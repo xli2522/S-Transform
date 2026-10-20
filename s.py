@@ -12,8 +12,9 @@
 
 """Discrete Stockwell (S) transform utilities.
 
-The forward transform returns positive-frequency rows. When the input is real
-and the complete positive-frequency range is requested, the inverse can
+The forward transform returns rows for the requested FFT frequencies. By
+default this is the canonical nonnegative range. When the input is real and
+the complete positive-frequency range is requested, the inverse can
 reconstruct the original signal by restoring conjugate negative-frequency
 bins.
 """
@@ -83,7 +84,17 @@ class STransformArray(np.ndarray):
     def frequencies(self) -> NDArray[np.float64]:
         """Actual frequency represented by each transform row, in hertz."""
         self._require_metadata()
-        return self.frequency_indices * self.sample_rate / self.input_length
+        return self.signed_frequency_indices * self.sample_rate / self.input_length
+
+    @property
+    def signed_frequency_indices(self) -> NDArray[np.int64]:
+        """Signed FFT-bin indices represented by each transform row."""
+        self._require_metadata()
+        return np.where(
+            self.frequency_indices <= self.input_length // 2,
+            self.frequency_indices,
+            self.frequency_indices - self.input_length,
+        )
 
     @property
     def times(self) -> NDArray[np.float64]:
@@ -134,9 +145,10 @@ def _validate_input(
 
     if not np.isfinite(fmin) or not np.isfinite(fmax):
         raise ValueError("freq_range values must be finite")
-    if fmin < 0 or fmax > nyquist or fmin >= fmax:
+    if fmin < -nyquist or fmax > nyquist or fmin >= fmax:
         raise ValueError(
-            f"freq_range must satisfy 0 <= fmin < fmax <= Nyquist ({nyquist:g} Hz)"
+            f"freq_range must satisfy -Nyquist <= fmin < fmax <= Nyquist "
+            f"({nyquist:g} Hz)"
         )
 
     if freq_step is None:
@@ -216,6 +228,22 @@ def _as_integer_array(values: ArrayLike, name: str) -> NDArray[np.int64]:
     return values_arr.astype(np.int64)
 
 
+def _normalize_frequency_indices(
+    values: ArrayLike,
+    original_length: int,
+    name: str,
+) -> NDArray[np.int64]:
+    """Convert raw or signed FFT-bin indices to canonical modulo-N bins."""
+    indices = _as_integer_array(values, name)
+    minimum_signed_bin = -(original_length // 2)
+    if np.any(indices < minimum_signed_bin) or np.any(indices >= original_length):
+        raise ValueError(
+            f"{name} must contain bins in the signed/raw range "
+            f"[{minimum_signed_bin}, {original_length - 1}]"
+        )
+    return np.mod(indices, original_length)
+
+
 def s_transform(
     ts: ArrayLike,
     sample_rate: float,
@@ -225,7 +253,7 @@ def s_transform(
     downsample: Optional[int] = None,
     max_output_elements: Optional[int] = 20_000_000,
 ) -> STransformArray:
-    """Compute the positive-frequency discrete Stockwell transform.
+    """Compute the discrete Stockwell transform over a signed frequency range.
 
     Parameters
     ----------
@@ -234,7 +262,8 @@ def s_transform(
     sample_rate : float
         Sample rate in hertz.
     freq_range : sequence of float, optional
-        Positive-frequency range in hertz. The default is ``(0, Nyquist)``.
+        Signed frequency range in hertz. The default is ``(0, Nyquist)``;
+        negative values select negative-frequency FFT bins.
     freq_step : float, optional
         Requested frequency spacing in hertz. The actual spacing is rounded
         up to an integer number of FFT bins. The default is one FFT bin.
@@ -253,7 +282,8 @@ def s_transform(
     -------
     STransformArray
         Complex array of shape ``(n_frequencies, n_time)``. The returned array
-        exposes ``frequency_indices``, ``frequencies``, ``times``,
+        exposes ``frequency_indices``, ``signed_frequency_indices``,
+        ``frequencies``, ``times``,
         ``sample_rate``, ``input_length`` and ``real_input`` metadata.
     """
     ts_arr, sample_rate, fmin, fmax, freq_step, downsample = _validate_input(
@@ -263,14 +293,28 @@ def s_transform(
     frequency_resolution = sample_rate / n_samples
     max_bin = n_samples // 2
 
-    # Use bins wholly inside the requested range. A requested spacing below
-    # one FFT bin is represented by the finest available spacing.
-    start_bin = max(0, int(np.ceil(fmin / frequency_resolution - 1e-12)))
-    stop_bin = min(max_bin, int(np.floor(fmax / frequency_resolution + 1e-12)))
+    # Use canonical signed bins. For even lengths, the Nyquist bin has only
+    # one representation and is assigned the positive sign.
+    min_signed_bin = -((n_samples - 1) // 2)
+    max_signed_bin = n_samples // 2
+    start_bin = max(
+        min_signed_bin,
+        int(np.ceil(fmin / frequency_resolution - 1e-12)),
+    )
+    stop_bin = min(
+        max_signed_bin,
+        int(np.floor(fmax / frequency_resolution + 1e-12)),
+    )
     if start_bin > stop_bin:
         raise ValueError("freq_range does not contain an available FFT bin")
     step_bins = max(1, int(np.ceil(freq_step / frequency_resolution - 1e-12)))
-    frequency_indices = np.arange(start_bin, stop_bin + 1, step_bins, dtype=np.int64)
+    signed_frequency_indices = np.arange(
+        start_bin,
+        stop_bin + 1,
+        step_bins,
+        dtype=np.int64,
+    )
+    frequency_indices = np.mod(signed_frequency_indices, n_samples)
 
     if max_output_elements is not None:
         max_output_elements = _as_integer_scalar(
@@ -301,12 +345,17 @@ def s_transform(
             # The zero-frequency S-transform row is the signal mean.
             row = np.full(n_samples, spectrum[0] / n_samples, dtype=np.complex128)
         else:
+            signed_frequency_index = (
+                frequency_index
+                if frequency_index <= max_bin
+                else frequency_index - n_samples
+            )
             shifted_spectrum = spectrum[
                 (frequency_index + np.arange(n_samples, dtype=np.int64)) % n_samples
             ]
             window = _window_normal(
                 n_samples,
-                frequency_index / alpha,
+                abs(signed_frequency_index) / alpha,
             )
             row = fft.ifft(shifted_spectrum * window)
         if output_length == n_samples:
@@ -336,18 +385,22 @@ def inverse_s_transform(
     When ``table`` is the result of :func:`s_transform`, its frequency-bin
     metadata is used automatically. For a plain ndarray, rows are assumed to
     represent contiguous FFT bins beginning at ``low_freq`` (default zero).
-    Exact reconstruction requires all positive-frequency bins through Nyquist,
-    no time downsampling, and a real input. Partial frequency ranges and
-    downsampled tables produce the corresponding band-limited approximation.
+    For real input, exact reconstruction requires all nonnegative-frequency
+    bins through Nyquist and no time downsampling. For complex input, request
+    the complete canonical signed-frequency range instead. Partial frequency
+    ranges and downsampled tables produce the corresponding band-limited
+    approximation.
 
     Parameters
     ----------
     table : array_like, shape (n_frequencies, n_time)
         S-transform table.
     low_freq : int, optional
-        Backward-compatible starting FFT bin for plain ndarray input.
+        Starting signed/raw FFT bin for plain ndarray input. Negative values
+        select negative-frequency bins.
     frequency_indices : array_like, optional
-        FFT-bin index for each row when ``table`` is a plain ndarray.
+        FFT-bin index for each row when ``table`` is a plain ndarray. Raw
+        modulo-``N`` indices and signed indices are both accepted.
     original_length : int, optional
         Length of the original signal. Required for a plain ndarray and
         inferred from ``STransformArray`` metadata otherwise.
@@ -376,47 +429,58 @@ def inverse_s_transform(
     n_frequencies, n_time = table_arr.shape
 
     if metadata is not None:
-        metadata_indices = _as_integer_array(
-            metadata.frequency_indices, "frequency_indices"
-        )
-        if frequency_indices is not None and not np.array_equal(
-            _as_integer_array(frequency_indices, "frequency_indices"),
-            metadata_indices,
-        ):
-            raise ValueError("frequency_indices do not match table metadata")
-        frequency_indices_arr = metadata_indices.copy()
         inferred_length = _as_integer_scalar(metadata.input_length, "input_length")
-        inferred_real = metadata.real_input
     else:
+        inferred_length = None
         if original_length is None:
             raise ValueError(
                 "original_length is required when inverting a plain ndarray"
             )
-        if frequency_indices is None:
-            start = 0 if low_freq is None else _as_integer_scalar(low_freq, "low_freq")
-            frequency_indices_arr = np.arange(
-                start,
-                start + n_frequencies,
-                dtype=np.int64,
-            )
-        else:
-            frequency_indices_arr = _as_integer_array(
-                frequency_indices, "frequency_indices"
-            )
-        inferred_length = None
-        inferred_real = False
-
-    if frequency_indices_arr.ndim != 1 or frequency_indices_arr.size != n_frequencies:
-        raise ValueError("frequency_indices must contain one FFT bin per table row")
 
     if original_length is None:
         original_length = inferred_length
     original_length = _as_integer_scalar(original_length, "original_length")
     if original_length <= 0:
         raise ValueError("original_length must be a positive integer")
-
     if metadata is not None and original_length != inferred_length:
         raise ValueError("original_length does not match the transform metadata")
+
+    if metadata is not None:
+        metadata_indices = _normalize_frequency_indices(
+            metadata.frequency_indices,
+            original_length,
+            "frequency_indices",
+        )
+        if frequency_indices is not None and not np.array_equal(
+            _normalize_frequency_indices(
+                frequency_indices,
+                original_length,
+                "frequency_indices",
+            ),
+            metadata_indices,
+        ):
+            raise ValueError("frequency_indices do not match table metadata")
+        frequency_indices_arr = metadata_indices.copy()
+        inferred_real = metadata.real_input
+    else:
+        if frequency_indices is None:
+            start = 0 if low_freq is None else _as_integer_scalar(low_freq, "low_freq")
+            provided_indices = np.arange(
+                start,
+                start + n_frequencies,
+                dtype=np.int64,
+            )
+        else:
+            provided_indices = frequency_indices
+        frequency_indices_arr = _normalize_frequency_indices(
+            provided_indices,
+            original_length,
+            "frequency_indices",
+        )
+        inferred_real = False
+
+    if frequency_indices_arr.ndim != 1 or frequency_indices_arr.size != n_frequencies:
+        raise ValueError("frequency_indices must contain one FFT bin per table row")
 
     if np.any(frequency_indices_arr < 0) or np.any(
         frequency_indices_arr >= original_length

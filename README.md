@@ -29,27 +29,44 @@ x = chirp(time, f0=10.0, t1=duration, f1=120.0, method="quadratic")
 
 st = s_transform(x, sample_rate=sample_rate)
 
-plt.imshow(
-    20 * np.log10(np.maximum(np.abs(st), 1e-12)),
-    origin="lower",
-    aspect="auto",
-    extent=(st.times[0], st.times[-1], st.frequencies[0], st.frequencies[-1]),
+plt.pcolormesh(
+    st.times,
+    st.frequencies,
+    np.abs(st),
+    shading="auto",
 )
 plt.xlabel("Time (s)")
 plt.ylabel("Frequency (Hz)")
-plt.title("S-transform magnitude (dB)")
-plt.colorbar(label="Magnitude (dB)")
+plt.title("S-transform magnitude")
+plt.colorbar(label="Magnitude")
 plt.show()
 ```
 
 The default transform uses every FFT bin from zero through Nyquist. The
 actual frequency represented by each row is available as `st.frequencies`.
 If `freq_step` is supplied, it is rounded up to an integer number of FFT bins;
-the selected bins are available as `st.frequency_indices`.
+the selected modulo-`N` FFT bins are available as `st.frequency_indices`, while
+`st.signed_frequency_indices` exposes their signed mathematical indices when a
+signed range is requested.
+
+For complex signals with negative-frequency content, request the signed range
+explicitly. The canonical FFT ordering uses the positive Nyquist bin for even
+lengths and represents all other negative bins with signed frequencies:
+
+```python
+complex_signal = x + 0.25j * np.sin(2 * np.pi * 80.0 * time)
+complex_st = s_transform(
+    complex_signal,
+    sample_rate=sample_rate,
+    freq_range=(-sample_rate / 2, sample_rate / 2),
+)
+complex_recovered, _ = inverse_s_transform(complex_st)
+np.testing.assert_allclose(complex_recovered, complex_signal, atol=1e-10)
+```
 
 ## Inversion
 
-For a real-valued signal, the full positive-frequency transform can be
+For a real-valued signal, the full nonnegative-frequency transform can be
 reconstructed without a manual magnitude correction:
 
 ```python
@@ -57,9 +74,11 @@ x_recovered, spectrum_recovered = inverse_s_transform(st)
 np.testing.assert_allclose(x_recovered.real, x, atol=1e-10)
 ```
 
-Exact reconstruction requires the full positive-frequency range, one row per
-FFT bin, and no time-axis downsampling. A restricted frequency range or a
-downsampled transform intentionally produces a band-limited approximation.
+For real signals, exact reconstruction requires the full nonnegative-frequency
+range, one row per FFT bin, and no time-axis downsampling. For complex signals,
+request the complete signed-frequency range shown above. A restricted
+frequency range or a downsampled transform intentionally produces a
+band-limited approximation.
 
 For a plain ndarray copied from a transform, pass the metadata explicitly:
 
@@ -76,7 +95,8 @@ Any sliced, transposed, or otherwise derived `STransformArray` loses its
 automatic metadata because its rows and columns may no longer correspond to
 the original axes. Pass `frequency_indices` and `original_length` explicitly
 when inverting such an array. Plain ndarrays always require
-`original_length`.
+`original_length`; inverse metadata accepts either raw modulo-`N` bins or
+negative signed bins and rejects aliases that refer to the same FFT bin.
 
 ## Downsampling
 
