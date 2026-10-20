@@ -35,9 +35,9 @@ def test_s_transform():
     st = s_transform(
         x,
         sample_rate=fs,
-        freq_range=(0.0, 500.0),
+        freq_range=(0, 300),
         freq_step=fs / x.size,
-        downsample=None
+        downsample=None,
     )
     plt.figure()
     plt.imshow(np.abs(st), origin='lower', aspect='auto')
@@ -48,22 +48,23 @@ def test_s_transform():
     # Inverse S-Transform
     x_rec, fft_rec = inverse_s_transform(st)
 
-    # Magnitude compensation (real signal, one-sided FFT)
-    x_rec_comp = x_rec * 2.0
+    # The inverse restores the conjugate negative-frequency bins for real input.
+    x_rec_comp = x_rec.real
+    np.testing.assert_allclose(x_rec_comp, x, atol=1e-10)
 
     # Plot original vs. recovered
     fig, axes = plt.subplots(2, 1, figsize=(8, 6))
     axes[0].plot(x)
     axes[0].set_title('Original Signal')
-    axes[1].plot(x_rec_comp.real)
-    axes[1].set_title('Recovered Signal (magnitude-compensated)')
+    axes[1].plot(x_rec_comp)
+    axes[1].set_title('Recovered Signal')
     plt.tight_layout()
     plt.show()
 
     # Reconstruction error
     plt.figure()
-    plt.plot(x_rec_comp.real, label='Recovered Signal')
-    plt.plot(x - x_rec_comp.real, label='Error')
+    plt.plot(x_rec_comp, label='Recovered Signal')
+    plt.plot(x - x_rec_comp, label='Error')
     plt.title('Time Series Reconstruction Error')
     plt.legend()
     plt.show()

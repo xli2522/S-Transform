@@ -1,103 +1,105 @@
-
-
+# S-Transform for Python
 Supported in: [![PyPI version](https://badge.fury.io/py/TFchirp.svg)](https://badge.fury.io/py/TFchirp)
 
-[References] 
-- R. G. Stockwell, L. Mansinha, and R. P. Lowe, Localization of the Complex Spectrum: The S Transform. IEEE 
-Transactions on Signal Processing, Vol. 44, No. 4, Apr. 1996
-- Stockwell, RG (1999). S-transform analysis of gravity wave activity from a small scale network of airglow imagers. 
-PhD thesis, University of Western Ontario, London, Ontario, Canada.
+This repository provides a NumPy/SciPy implementation of the discrete
+Stockwell (S) transform for one-dimensional signals.
 
-## S (Stockwell) Transform for Chirp Signals
+## Quick start
 
-Step 1: Quadratic chirp signal
+Install the runtime dependencies:
 
-Generate a quadratic chirp signal from 10 Hz to 120 Hz in 3 seconds with 3,000 sampling points.
+```bash
+python -m pip install -r requirements.txt
+```
 
-```Python
+The transform returns an ndarray-compatible object with the frequency-bin and
+time-axis metadata needed to interpret or invert it:
+
+```python
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.signal import chirp
 
-# Time vector and sampling rate
-dt = 0.001
-t_end = 3.0
-fs = int(1.0 / dt)
-t = np.linspace(0, t_end, int(t_end * fs), endpoint=False)
+from s import inverse_s_transform, s_transform
 
-# Generate quadratic chirp signal
-x = chirp(t, f0=10.0, t1=t_end, f1=120.0, method='quadratic')
-```
+sample_rate = 1_000.0
+duration = 3.0
+time = np.arange(0.0, duration, 1.0 / sample_rate)
+x = chirp(time, f0=10.0, t1=duration, f1=120.0, method="quadratic")
 
-Step 2: S Transform Spectrogram
+st = s_transform(x, sample_rate=sample_rate)
 
-```Python
-from s import s_transform, inverse_s_transform
-
-# Compute S-Transform spectrogram
-st = s_transform(
-    x,
-    sample_rate=fs,
-    freq_range=(0.0, 500.0),
-    freq_step=fs / x.size,
-    downsample=None
+plt.imshow(
+    20 * np.log10(np.maximum(np.abs(st), 1e-12)),
+    origin="lower",
+    aspect="auto",
+    extent=(st.times[0], st.times[-1], st.frequencies[0], st.frequencies[-1]),
 )
-plt.figure()
-plt.imshow(np.abs(st), origin='lower', aspect='auto')
-plt.title('Original Spectrogram')
-plt.colorbar()
+plt.xlabel("Time (s)")
+plt.ylabel("Frequency (Hz)")
+plt.title("S-transform magnitude (dB)")
+plt.colorbar(label="Magnitude (dB)")
 plt.show()
 ```
 
-![Original Spectrogram](https://github.com/xli2522/S-Transform/blob/main/img/original_spectrogram.png?raw=true)
+The default transform uses every FFT bin from zero through Nyquist. The
+actual frequency represented by each row is available as `st.frequencies`.
+If `freq_step` is supplied, it is rounded up to an integer number of FFT bins;
+the selected bins are available as `st.frequency_indices`.
 
-Step 3: The inverse S transform
+## Inversion
+
+For a real-valued signal, the full positive-frequency transform can be
+reconstructed without a manual magnitude correction:
 
 ```python
-# Inverse S-Transform
-x_rec, fft_rec = inverse_s_transform(st)
-
-# Magnitude compensation (real signal, one-sided FFT)
-x_rec_comp = x_rec * 2.0
-
-# Plot original vs. recovered
-fig, axes = plt.subplots(2, 1, figsize=(8, 6))
-axes[0].plot(x)
-axes[0].set_title('Original Signal')
-axes[1].plot(x_rec_comp.real)
-axes[1].set_title('Recovered Signal (magnitude-compensated)')
-plt.tight_layout()
-plt.show()
-
-# Reconstruction error
-plt.figure()
-plt.plot(x_rec_comp.real, label='Recovered Signal')
-plt.plot(x - x_rec_comp.real, label='Error')
-plt.title('Time Series Reconstruction Error')
-plt.legend()
-plt.show()
+x_recovered, spectrum_recovered = inverse_s_transform(st)
+np.testing.assert_allclose(x_recovered.real, x, atol=1e-10)
 ```
 
-![Recovered ts and Error](https://github.com/xli2522/S-Transform/blob/main/img/recovered_ts_error.png?raw=true)
+Exact reconstruction requires the full positive-frequency range, one row per
+FFT bin, and no time-axis downsampling. A restricted frequency range or a
+downsampled transform intentionally produces a band-limited approximation.
 
-Step 4: Recovered inverse S transform spectrogram
+For a plain ndarray copied from a transform, pass the metadata explicitly:
 
 ```python
-# Spectrogram of recovered signal
-st_rec = s_transform(
-    x_rec.real,
-    sample_rate=fs,
-    freq_range=(0.0, 500.0),
-    freq_step=fs / x_rec.size
+x_recovered, spectrum_recovered = inverse_s_transform(
+    np.asarray(st),
+    frequency_indices=st.frequency_indices,
+    original_length=st.input_length,
+    real_output=st.real_input,
 )
-plt.figure()
-plt.imshow(np.abs(st_rec), origin='lower', aspect='auto')
-plt.title('Recovered Spectrogram')
-plt.colorbar()
-plt.show()
 ```
 
-![Recovered Spectrogram](https://github.com/xli2522/S-Transform/blob/main/img/recovered_spectrogram.png?raw=true)
+Any sliced, transposed, or otherwise derived `STransformArray` loses its
+automatic metadata because its rows and columns may no longer correspond to
+the original axes. Pass `frequency_indices` and `original_length` explicitly
+when inverting such an array. Plain ndarrays always require
+`original_length`.
 
-## One of the original copies of Dr. Stockwell's PhD thesis. 
+## Downsampling
+
+`downsample=M` resamples the transform's time axis to `M` columns after the
+transform is computed. It accepts both even and odd positive lengths. Reducing
+the number of columns is not lossless. To prevent accidental multi-gigabyte
+allocations, `s_transform` limits the output to 20 million complex elements by
+default; pass `max_output_elements=None` only when a larger transform is
+intentional.
+
+## References
+
+- R. G. Stockwell, L. Mansinha, and R. P. Lowe, “Localization of the Complex
+  Spectrum: The S Transform,” *IEEE Transactions on Signal Processing*, 1996.
+- R. G. Stockwell, *S-transform analysis of gravity wave activity from a small
+  scale network of airglow imagers*, PhD thesis, University of Western Ontario,
+  1999.
+
+![Original spectrogram](img/original_spectrogram.png)
+
+![Recovered signal and error](img/recovered_ts_error.png)
+
+## Reference material
+
+## One of the original copies of Dr. Stockwell's PhD thesis.
 ![Thesis](https://github.com/xli2522/S-Transform/blob/main/img/stockwell_thesis_small.jpg?raw=true)
