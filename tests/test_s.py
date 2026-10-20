@@ -29,7 +29,7 @@ def test_full_real_transform_round_trips_without_manual_factor():
 
 
 def test_frequency_step_preserves_actual_fft_bin_indices():
-    x = np.zeros(32)
+    x = np.sin(2 * np.pi * 4 * np.arange(32) / 32)
     transform = s_transform(
         x,
         sample_rate=32,
@@ -39,6 +39,7 @@ def test_frequency_step_preserves_actual_fft_bin_indices():
 
     np.testing.assert_array_equal(transform.frequency_indices, np.arange(0, 17, 4))
     np.testing.assert_allclose(transform.frequencies, np.arange(0, 17, 4))
+    np.testing.assert_allclose(np.fft.fft(transform[1])[0], -16j, atol=1e-10)
 
 
 def test_odd_downsample_is_supported_and_metadata_survives_inverse():
@@ -83,4 +84,55 @@ def test_plain_ndarray_can_be_inverted_with_explicit_metadata():
         real_output=True,
     )
 
-    np.testing.assert_allclose(recovered.real, x, atol=1e-10)
+    np.testing.assert_allclose(recovered, x, atol=1e-10)
+    np.testing.assert_allclose(recovered.imag, 0.0, atol=1e-10)
+
+
+def test_plain_ndarray_requires_original_length():
+    with pytest.raises(ValueError, match="original_length"):
+        inverse_s_transform(np.zeros((2, 8), dtype=complex))
+
+
+def test_inverse_rejects_fractional_or_duplicate_frequency_bins():
+    table = np.zeros((2, 8), dtype=complex)
+
+    with pytest.raises(ValueError, match="integer"):
+        inverse_s_transform(
+            table,
+            frequency_indices=[0.5, 1],
+            original_length=8,
+        )
+    with pytest.raises(ValueError, match="duplicates"):
+        inverse_s_transform(
+            table,
+            frequency_indices=[1, 1],
+            original_length=8,
+        )
+
+
+def test_inverse_rejects_conflicting_original_length():
+    transform = s_transform(np.ones(16), sample_rate=16)
+
+    with pytest.raises(ValueError, match="metadata"):
+        inverse_s_transform(transform, original_length=32)
+
+
+def test_derived_transform_requires_explicit_metadata():
+    transform = s_transform(np.ones(16), sample_rate=16)
+    derived = transform[:, :8]
+
+    with pytest.raises(ValueError, match="metadata"):
+        inverse_s_transform(derived)
+
+    recovered, _ = inverse_s_transform(
+        derived,
+        frequency_indices=transform.frequency_indices,
+        original_length=16,
+        real_output=True,
+    )
+    assert recovered.shape == (16,)
+
+
+def test_transform_output_limit_is_enforced():
+    with pytest.raises(MemoryError, match="max_output_elements"):
+        s_transform(np.ones(16), sample_rate=16, max_output_elements=8)

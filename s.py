@@ -56,24 +56,39 @@ class STransformArray(np.ndarray):
         obj.sample_rate = float(sample_rate)
         obj.input_length = int(input_length)
         obj.real_input = bool(real_input)
+        obj._metadata_valid = True
         return obj
 
     def __array_finalize__(self, obj: Optional[np.ndarray]) -> None:
         if obj is None:
             return
-        self.frequency_indices = getattr(obj, "frequency_indices", None)
-        self.sample_rate = getattr(obj, "sample_rate", None)
-        self.input_length = getattr(obj, "input_length", None)
-        self.real_input = getattr(obj, "real_input", None)
+        # A view may slice, reorder, or transpose rows and columns. There is
+        # no generally safe way to update the metadata for all such
+        # operations, so derived arrays must opt back in with explicit
+        # metadata when they are passed to the inverse.
+        self.frequency_indices = None
+        self.sample_rate = None
+        self.input_length = None
+        self.real_input = None
+        self._metadata_valid = False
+
+    def _require_metadata(self) -> None:
+        if not getattr(self, "_metadata_valid", False):
+            raise ValueError(
+                "transform metadata is unavailable after an array operation; "
+                "use the original transform or pass explicit metadata"
+            )
 
     @property
     def frequencies(self) -> NDArray[np.float64]:
         """Actual frequency represented by each transform row, in hertz."""
+        self._require_metadata()
         return self.frequency_indices * self.sample_rate / self.input_length
 
     @property
     def times(self) -> NDArray[np.float64]:
         """Time coordinate represented by each transform column, in seconds."""
+        self._require_metadata()
         return np.arange(self.shape[1], dtype=float) * self.input_length / (
             self.shape[1] * self.sample_rate
         )
@@ -173,6 +188,34 @@ def _window_normal(
     return factor * np.exp(-2.0 * np.pi**2 * (signed_bins / freq) ** 2)
 
 
+def _as_integer_scalar(value: object, name: str) -> int:
+    """Validate an integer-valued scalar without silently truncating it."""
+    if isinstance(value, bool) or not isinstance(value, (int, np.integer)):
+        raise TypeError(f"{name} must be an integer")
+    return int(value)
+
+
+def _as_integer_array(values: ArrayLike, name: str) -> NDArray[np.int64]:
+    """Validate a one-dimensional integer-valued array."""
+    values_arr = np.asarray(values)
+    if values_arr.ndim != 1:
+        raise ValueError(f"{name} must be one-dimensional")
+    if not np.issubdtype(values_arr.dtype, np.number):
+        raise TypeError(f"{name} must contain numbers")
+    if np.issubdtype(values_arr.dtype, np.complexfloating):
+        if np.any(values_arr.imag != 0):
+            raise ValueError(f"{name} must contain real integers")
+        values_arr = values_arr.real
+    if not np.all(np.isfinite(values_arr)):
+        raise ValueError(f"{name} must contain finite integers")
+    if not np.all(values_arr == np.floor(values_arr)):
+        raise ValueError(f"{name} must contain integer values")
+    int64_info = np.iinfo(np.int64)
+    if np.any(values_arr < int64_info.min) or np.any(values_arr > int64_info.max):
+        raise ValueError(f"{name} contains values outside the int64 range")
+    return values_arr.astype(np.int64)
+
+
 def s_transform(
     ts: ArrayLike,
     sample_rate: float,
@@ -180,6 +223,7 @@ def s_transform(
     freq_step: Optional[float] = None,
     alpha: float = 1.0,
     downsample: Optional[int] = None,
+    max_output_elements: Optional[int] = 20_000_000,
 ) -> STransformArray:
     """Compute the positive-frequency discrete Stockwell transform.
 
@@ -201,6 +245,9 @@ def s_transform(
         If supplied, resample the time axis to this many columns after the
         transform. This is time-axis resampling and is not lossless when it
         reduces the number of columns.
+    max_output_elements : int or None, optional
+        Safety limit for the number of complex output elements. Set to
+        ``None`` to opt into an unbounded allocation for large transforms.
 
     Returns
     -------
@@ -225,9 +272,31 @@ def s_transform(
     step_bins = max(1, int(np.ceil(freq_step / frequency_resolution - 1e-12)))
     frequency_indices = np.arange(start_bin, stop_bin + 1, step_bins, dtype=np.int64)
 
+    if max_output_elements is not None:
+        max_output_elements = _as_integer_scalar(
+            max_output_elements, "max_output_elements"
+        )
+        if max_output_elements <= 0:
+            raise ValueError("max_output_elements must be positive or None")
+    output_length = n_samples if downsample is None else downsample
+    output_elements = frequency_indices.size * output_length
+    if (
+        max_output_elements is not None
+        and output_elements > max_output_elements
+    ):
+        raise MemoryError(
+            f"requested transform has {output_elements:,} complex elements, "
+            f"which exceeds max_output_elements={max_output_elements:,}; "
+            "reduce the frequency range/downsample or pass "
+            "max_output_elements=None"
+        )
+
     spectrum = fft.fft(ts_arr)
-    rows = []
-    for frequency_index in frequency_indices:
+    transform = np.empty(
+        (frequency_indices.size, output_length),
+        dtype=np.complex128,
+    )
+    for row_index, frequency_index in enumerate(frequency_indices):
         if frequency_index == 0:
             # The zero-frequency S-transform row is the signal mean.
             row = np.full(n_samples, spectrum[0] / n_samples, dtype=np.complex128)
@@ -240,11 +309,10 @@ def s_transform(
                 frequency_index / alpha,
             )
             row = fft.ifft(shifted_spectrum * window)
-        rows.append(row)
-
-    transform = np.asarray(rows, dtype=np.complex128)
-    if downsample is not None and downsample != n_samples:
-        transform = signal.resample(transform, downsample, axis=1)
+        if output_length == n_samples:
+            transform[row_index] = row
+        else:
+            transform[row_index] = signal.resample(row, output_length)
 
     return STransformArray(
         transform,
@@ -281,8 +349,8 @@ def inverse_s_transform(
     frequency_indices : array_like, optional
         FFT-bin index for each row when ``table`` is a plain ndarray.
     original_length : int, optional
-        Length of the original signal. Required for a downsampled plain
-        ndarray and inferred from ``STransformArray`` metadata otherwise.
+        Length of the original signal. Required for a plain ndarray and
+        inferred from ``STransformArray`` metadata otherwise.
     real_output : bool, optional
         Mirror positive-frequency coefficients when true. Inferred from the
         forward-transform metadata when available.
@@ -290,48 +358,72 @@ def inverse_s_transform(
     if low_freq is not None and frequency_indices is not None:
         raise ValueError("provide either low_freq or frequency_indices, not both")
 
-    metadata = table if isinstance(table, STransformArray) else None
+    metadata = (
+        table
+        if isinstance(table, STransformArray)
+        and getattr(table, "_metadata_valid", False)
+        else None
+    )
+    if isinstance(table, STransformArray) and metadata is None:
+        if frequency_indices is None:
+            raise ValueError(
+                "transform metadata is unavailable; pass frequency_indices "
+                "and original_length explicitly"
+            )
     table_arr = np.asarray(table, dtype=np.complex128)
     if table_arr.ndim != 2:
         raise ValueError("table must be a two-dimensional array")
     n_frequencies, n_time = table_arr.shape
 
     if metadata is not None:
-        metadata_indices = metadata.frequency_indices
+        metadata_indices = _as_integer_array(
+            metadata.frequency_indices, "frequency_indices"
+        )
         if frequency_indices is not None and not np.array_equal(
-            np.asarray(frequency_indices), metadata_indices
+            _as_integer_array(frequency_indices, "frequency_indices"),
+            metadata_indices,
         ):
             raise ValueError("frequency_indices do not match table metadata")
-        frequency_indices_arr = metadata_indices
-        inferred_length = metadata.input_length
+        frequency_indices_arr = metadata_indices.copy()
+        inferred_length = _as_integer_scalar(metadata.input_length, "input_length")
         inferred_real = metadata.real_input
     else:
+        if original_length is None:
+            raise ValueError(
+                "original_length is required when inverting a plain ndarray"
+            )
         if frequency_indices is None:
-            start = 0 if low_freq is None else int(low_freq)
-            frequency_indices_arr = np.arange(start, start + n_frequencies)
+            start = 0 if low_freq is None else _as_integer_scalar(low_freq, "low_freq")
+            frequency_indices_arr = np.arange(
+                start,
+                start + n_frequencies,
+                dtype=np.int64,
+            )
         else:
-            frequency_indices_arr = np.asarray(frequency_indices, dtype=np.int64)
-        inferred_length = n_time
+            frequency_indices_arr = _as_integer_array(
+                frequency_indices, "frequency_indices"
+            )
+        inferred_length = None
         inferred_real = False
 
-    frequency_indices_arr = np.asarray(frequency_indices_arr, dtype=np.int64)
     if frequency_indices_arr.ndim != 1 or frequency_indices_arr.size != n_frequencies:
         raise ValueError("frequency_indices must contain one FFT bin per table row")
 
     if original_length is None:
         original_length = inferred_length
-    if isinstance(original_length, bool) or not isinstance(
-        original_length, (int, np.integer)
-    ):
-        raise TypeError("original_length must be a positive integer")
-    original_length = int(original_length)
+    original_length = _as_integer_scalar(original_length, "original_length")
     if original_length <= 0:
         raise ValueError("original_length must be a positive integer")
+
+    if metadata is not None and original_length != inferred_length:
+        raise ValueError("original_length does not match the transform metadata")
 
     if np.any(frequency_indices_arr < 0) or np.any(
         frequency_indices_arr >= original_length
     ):
         raise ValueError("frequency_indices contain bins outside original_length")
+    if np.unique(frequency_indices_arr).size != frequency_indices_arr.size:
+        raise ValueError("frequency_indices must not contain duplicates")
 
     if real_output is None:
         real_output = inferred_real

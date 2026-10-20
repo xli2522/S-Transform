@@ -71,11 +71,20 @@ x_recovered, spectrum_recovered = inverse_s_transform(
 )
 ```
 
+Any sliced, transposed, or otherwise derived `STransformArray` loses its
+automatic metadata because its rows and columns may no longer correspond to
+the original axes. Pass `frequency_indices` and `original_length` explicitly
+when inverting such an array. Plain ndarrays always require
+`original_length`.
+
 ## Downsampling
 
 `downsample=M` resamples the transform's time axis to `M` columns after the
 transform is computed. It accepts both even and odd positive lengths. Reducing
-the number of columns is not lossless.
+the number of columns is not lossless. To prevent accidental multi-gigabyte
+allocations, `s_transform` limits the output to 20 million complex elements by
+default; pass `max_output_elements=None` only when a larger transform is
+intentional.
 
 ## References
 

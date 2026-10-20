@@ -37,7 +37,7 @@ def test_s_transform():
         sample_rate=fs,
         freq_range=(0, 300),
         freq_step=fs / x.size,
-        downsample=1799
+        downsample=None,
     )
     plt.figure()
     plt.imshow(np.abs(st), origin='lower', aspect='auto')
@@ -50,6 +50,7 @@ def test_s_transform():
 
     # The inverse restores the conjugate negative-frequency bins for real input.
     x_rec_comp = x_rec.real
+    np.testing.assert_allclose(x_rec_comp, x, atol=1e-10)
 
     # Plot original vs. recovered
     fig, axes = plt.subplots(2, 1, figsize=(8, 6))
