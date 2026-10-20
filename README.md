@@ -90,7 +90,8 @@ Any sliced, transposed, or otherwise derived `STransformArray` loses its
 automatic metadata because its rows and columns may no longer correspond to
 the original axes. Pass `frequency_indices` and `original_length` explicitly
 when inverting such an array. Plain ndarrays always require
-`original_length`.
+`original_length`; inverse metadata accepts either raw modulo-`N` bins or
+negative signed bins and rejects aliases that refer to the same FFT bin.
 
 ## Downsampling
 
