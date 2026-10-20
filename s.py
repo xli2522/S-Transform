@@ -228,6 +228,22 @@ def _as_integer_array(values: ArrayLike, name: str) -> NDArray[np.int64]:
     return values_arr.astype(np.int64)
 
 
+def _normalize_frequency_indices(
+    values: ArrayLike,
+    original_length: int,
+    name: str,
+) -> NDArray[np.int64]:
+    """Convert raw or signed FFT-bin indices to canonical modulo-N bins."""
+    indices = _as_integer_array(values, name)
+    minimum_signed_bin = -(original_length // 2)
+    if np.any(indices < minimum_signed_bin) or np.any(indices >= original_length):
+        raise ValueError(
+            f"{name} must contain bins in the signed/raw range "
+            f"[{minimum_signed_bin}, {original_length - 1}]"
+        )
+    return np.mod(indices, original_length)
+
+
 def s_transform(
     ts: ArrayLike,
     sample_rate: float,
@@ -378,9 +394,11 @@ def inverse_s_transform(
     table : array_like, shape (n_frequencies, n_time)
         S-transform table.
     low_freq : int, optional
-        Backward-compatible starting FFT bin for plain ndarray input.
+        Starting signed/raw FFT bin for plain ndarray input. Negative values
+        select negative-frequency bins.
     frequency_indices : array_like, optional
-        FFT-bin index for each row when ``table`` is a plain ndarray.
+        FFT-bin index for each row when ``table`` is a plain ndarray. Raw
+        modulo-``N`` indices and signed indices are both accepted.
     original_length : int, optional
         Length of the original signal. Required for a plain ndarray and
         inferred from ``STransformArray`` metadata otherwise.
@@ -409,47 +427,58 @@ def inverse_s_transform(
     n_frequencies, n_time = table_arr.shape
 
     if metadata is not None:
-        metadata_indices = _as_integer_array(
-            metadata.frequency_indices, "frequency_indices"
-        )
-        if frequency_indices is not None and not np.array_equal(
-            _as_integer_array(frequency_indices, "frequency_indices"),
-            metadata_indices,
-        ):
-            raise ValueError("frequency_indices do not match table metadata")
-        frequency_indices_arr = metadata_indices.copy()
         inferred_length = _as_integer_scalar(metadata.input_length, "input_length")
-        inferred_real = metadata.real_input
     else:
+        inferred_length = None
         if original_length is None:
             raise ValueError(
                 "original_length is required when inverting a plain ndarray"
             )
-        if frequency_indices is None:
-            start = 0 if low_freq is None else _as_integer_scalar(low_freq, "low_freq")
-            frequency_indices_arr = np.arange(
-                start,
-                start + n_frequencies,
-                dtype=np.int64,
-            )
-        else:
-            frequency_indices_arr = _as_integer_array(
-                frequency_indices, "frequency_indices"
-            )
-        inferred_length = None
-        inferred_real = False
-
-    if frequency_indices_arr.ndim != 1 or frequency_indices_arr.size != n_frequencies:
-        raise ValueError("frequency_indices must contain one FFT bin per table row")
 
     if original_length is None:
         original_length = inferred_length
     original_length = _as_integer_scalar(original_length, "original_length")
     if original_length <= 0:
         raise ValueError("original_length must be a positive integer")
-
     if metadata is not None and original_length != inferred_length:
         raise ValueError("original_length does not match the transform metadata")
+
+    if metadata is not None:
+        metadata_indices = _normalize_frequency_indices(
+            metadata.frequency_indices,
+            original_length,
+            "frequency_indices",
+        )
+        if frequency_indices is not None and not np.array_equal(
+            _normalize_frequency_indices(
+                frequency_indices,
+                original_length,
+                "frequency_indices",
+            ),
+            metadata_indices,
+        ):
+            raise ValueError("frequency_indices do not match table metadata")
+        frequency_indices_arr = metadata_indices.copy()
+        inferred_real = metadata.real_input
+    else:
+        if frequency_indices is None:
+            start = 0 if low_freq is None else _as_integer_scalar(low_freq, "low_freq")
+            provided_indices = np.arange(
+                start,
+                start + n_frequencies,
+                dtype=np.int64,
+            )
+        else:
+            provided_indices = frequency_indices
+        frequency_indices_arr = _normalize_frequency_indices(
+            provided_indices,
+            original_length,
+            "frequency_indices",
+        )
+        inferred_real = False
+
+    if frequency_indices_arr.ndim != 1 or frequency_indices_arr.size != n_frequencies:
+        raise ValueError("frequency_indices must contain one FFT bin per table row")
 
     if np.any(frequency_indices_arr < 0) or np.any(
         frequency_indices_arr >= original_length

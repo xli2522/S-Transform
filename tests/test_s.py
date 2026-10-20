@@ -73,6 +73,25 @@ def test_signed_frequency_range_round_trips_complex_signal():
     np.testing.assert_allclose(recovered_spectrum[-5], n_samples, atol=1e-10)
 
 
+def test_inverse_accepts_signed_indices_for_plain_arrays():
+    n_samples = 16
+    sample_indices = np.arange(n_samples)
+    x = np.exp(-2j * np.pi * 3 * sample_indices / n_samples)
+    transform = s_transform(
+        x,
+        sample_rate=n_samples,
+        freq_range=(-n_samples / 2, n_samples / 2),
+    )
+
+    recovered, _ = inverse_s_transform(
+        np.asarray(transform),
+        frequency_indices=transform.signed_frequency_indices,
+        original_length=n_samples,
+    )
+
+    np.testing.assert_allclose(recovered, x, atol=1e-10)
+
+
 def test_odd_downsample_is_supported_and_metadata_survives_inverse():
     x = np.sin(2 * np.pi * np.arange(32) / 32)
     transform = s_transform(x, sample_rate=32, downsample=15)
@@ -137,6 +156,12 @@ def test_inverse_rejects_fractional_or_duplicate_frequency_bins():
         inverse_s_transform(
             table,
             frequency_indices=[1, 1],
+            original_length=8,
+        )
+    with pytest.raises(ValueError, match="duplicates"):
+        inverse_s_transform(
+            table,
+            frequency_indices=[-1, 7],
             original_length=8,
         )
 
