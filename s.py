@@ -385,9 +385,11 @@ def inverse_s_transform(
     When ``table`` is the result of :func:`s_transform`, its frequency-bin
     metadata is used automatically. For a plain ndarray, rows are assumed to
     represent contiguous FFT bins beginning at ``low_freq`` (default zero).
-    Exact reconstruction requires all positive-frequency bins through Nyquist,
-    no time downsampling, and a real input. Partial frequency ranges and
-    downsampled tables produce the corresponding band-limited approximation.
+    For real input, exact reconstruction requires all nonnegative-frequency
+    bins through Nyquist and no time downsampling. For complex input, request
+    the complete canonical signed-frequency range instead. Partial frequency
+    ranges and downsampled tables produce the corresponding band-limited
+    approximation.
 
     Parameters
     ----------

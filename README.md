@@ -71,9 +71,11 @@ x_recovered, spectrum_recovered = inverse_s_transform(st)
 np.testing.assert_allclose(x_recovered.real, x, atol=1e-10)
 ```
 
-Exact reconstruction requires the full positive-frequency range, one row per
-FFT bin, and no time-axis downsampling. A restricted frequency range or a
-downsampled transform intentionally produces a band-limited approximation.
+For real signals, exact reconstruction requires the full nonnegative-frequency
+range, one row per FFT bin, and no time-axis downsampling. For complex signals,
+request the complete signed-frequency range shown above. A restricted
+frequency range or a downsampled transform intentionally produces a
+band-limited approximation.
 
 For a plain ndarray copied from a transform, pass the metadata explicitly:
 
