@@ -49,6 +49,21 @@ the selected modulo-`N` FFT bins are available as `st.frequency_indices`, while
 `st.signed_frequency_indices` exposes their signed mathematical indices when a
 signed range is requested.
 
+For complex signals with negative-frequency content, request the signed range
+explicitly. The canonical FFT ordering uses the positive Nyquist bin for even
+lengths and represents all other negative bins with signed frequencies:
+
+```python
+complex_signal = x + 0.25j * np.sin(2 * np.pi * 80.0 * time)
+complex_st = s_transform(
+    complex_signal,
+    sample_rate=sample_rate,
+    freq_range=(-sample_rate / 2, sample_rate / 2),
+)
+complex_recovered, _ = inverse_s_transform(complex_st)
+np.testing.assert_allclose(complex_recovered, complex_signal, atol=1e-10)
+```
+
 ## Inversion
 
 For a real-valued signal, the full nonnegative-frequency transform can be
