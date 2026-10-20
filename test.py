@@ -13,6 +13,8 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+import os
+import tempfile
 from pathlib import Path
 
 import numpy as np
@@ -22,6 +24,26 @@ from s import s_transform, inverse_s_transform
 
 
 IMAGE_DIR = Path(__file__).with_name("img")
+
+
+def _save_figure_atomically(figure, output_path: Path, *, dpi: int = 150) -> None:
+    """Render a figure privately, then publish the complete image atomically."""
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    temporary_path = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            dir=output_path.parent,
+            prefix=f".{output_path.stem}-",
+            suffix=output_path.suffix,
+            delete=False,
+        ) as temporary_file:
+            temporary_path = Path(temporary_file.name)
+        figure.savefig(temporary_path, dpi=dpi)
+        os.replace(temporary_path, output_path)
+    finally:
+        if temporary_path is not None:
+            temporary_path.unlink(missing_ok=True)
+
 
 def test_s_transform():
     """
@@ -54,7 +76,10 @@ def test_s_transform():
     axis.set_ylabel('Frequency (Hz)')
     fig.colorbar(image, ax=axis, label='Magnitude')
     fig.tight_layout()
-    fig.savefig(IMAGE_DIR / 'original_spectrogram.png', dpi=150)
+    _save_figure_atomically(
+        fig,
+        IMAGE_DIR / 'original_spectrogram.png',
+    )
     plt.show()
     plt.close(fig)
 
@@ -83,7 +108,10 @@ def test_s_transform():
     axis.set_xlabel('Time (s)')
     axis.legend()
     fig.tight_layout()
-    fig.savefig(IMAGE_DIR / 'recovered_ts_error.png', dpi=150)
+    _save_figure_atomically(
+        fig,
+        IMAGE_DIR / 'recovered_ts_error.png',
+    )
     plt.show()
     plt.close(fig)
 
@@ -106,7 +134,10 @@ def test_s_transform():
     axis.set_ylabel('Frequency (Hz)')
     fig.colorbar(image, ax=axis, label='Magnitude')
     fig.tight_layout()
-    fig.savefig(IMAGE_DIR / 'recovered_spectrogram.png', dpi=150)
+    _save_figure_atomically(
+        fig,
+        IMAGE_DIR / 'recovered_spectrogram.png',
+    )
     plt.show()
     plt.close(fig)
 
