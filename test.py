@@ -43,14 +43,15 @@ def test_s_transform():
     )
     display_mask = st.frequencies <= 300.0
     fig, axis = plt.subplots(figsize=(8, 5))
-    image = axis.imshow(
+    image = axis.pcolormesh(
+        st.times,
+        st.frequencies[display_mask],
         np.abs(np.asarray(st)[display_mask]),
-        origin='lower',
-        aspect='auto',
+        shading='auto',
     )
     axis.set_title('Original Spectrogram (0–300 Hz)')
-    axis.set_xlabel('Time samples')
-    axis.set_ylabel('Frequency bins')
+    axis.set_xlabel('Time (s)')
+    axis.set_ylabel('Frequency (Hz)')
     fig.colorbar(image, ax=axis, label='Magnitude')
     fig.tight_layout()
     fig.savefig(IMAGE_DIR / 'original_spectrogram.png', dpi=150)
@@ -66,19 +67,20 @@ def test_s_transform():
 
     # Plot original vs. recovered
     fig, axes = plt.subplots(2, 1, figsize=(8, 6))
-    axes[0].plot(x)
+    axes[0].plot(t, x)
     axes[0].set_title('Original Signal')
-    axes[1].plot(x_rec_comp)
+    axes[1].plot(t, x_rec_comp)
     axes[1].set_title('Recovered Signal')
+    axes[1].set_xlabel('Time (s)')
     plt.tight_layout()
     plt.show()
 
     # Reconstruction error
     fig, axis = plt.subplots(figsize=(8, 4))
-    axis.plot(x_rec_comp, label='Recovered Signal')
-    axis.plot(x - x_rec_comp, label='Error')
+    axis.plot(t, x_rec_comp, label='Recovered Signal')
+    axis.plot(t, x - x_rec_comp, label='Error')
     axis.set_title('Time Series Reconstruction Error')
-    axis.set_xlabel('Time samples')
+    axis.set_xlabel('Time (s)')
     axis.legend()
     fig.tight_layout()
     fig.savefig(IMAGE_DIR / 'recovered_ts_error.png', dpi=150)
@@ -93,10 +95,15 @@ def test_s_transform():
         freq_step=fs / x_rec.size
     )
     fig, axis = plt.subplots(figsize=(8, 5))
-    image = axis.imshow(np.abs(st_rec), origin='lower', aspect='auto')
+    image = axis.pcolormesh(
+        st_rec.times,
+        st_rec.frequencies,
+        np.abs(np.asarray(st_rec)),
+        shading='auto',
+    )
     axis.set_title('Recovered Spectrogram')
-    axis.set_xlabel('Time samples')
-    axis.set_ylabel('Frequency bins')
+    axis.set_xlabel('Time (s)')
+    axis.set_ylabel('Frequency (Hz)')
     fig.colorbar(image, ax=axis, label='Magnitude')
     fig.tight_layout()
     fig.savefig(IMAGE_DIR / 'recovered_spectrogram.png', dpi=150)

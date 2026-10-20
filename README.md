@@ -29,16 +29,16 @@ x = chirp(time, f0=10.0, t1=duration, f1=120.0, method="quadratic")
 
 st = s_transform(x, sample_rate=sample_rate)
 
-plt.imshow(
-    20 * np.log10(np.maximum(np.abs(st), 1e-12)),
-    origin="lower",
-    aspect="auto",
-    extent=(st.times[0], st.times[-1], st.frequencies[0], st.frequencies[-1]),
+plt.pcolormesh(
+    st.times,
+    st.frequencies,
+    np.abs(st),
+    shading="auto",
 )
 plt.xlabel("Time (s)")
 plt.ylabel("Frequency (Hz)")
-plt.title("S-transform magnitude (dB)")
-plt.colorbar(label="Magnitude (dB)")
+plt.title("S-transform magnitude")
+plt.colorbar(label="Magnitude")
 plt.show()
 ```
 
