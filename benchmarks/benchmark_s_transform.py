@@ -136,18 +136,20 @@ def _worker(case: BenchmarkCase, implementation: str, repeats: int) -> None:
     samples = _make_signal(case)
     _run_implementation(samples, case, implementation)
     durations = []
-    result = None
+    result_shape = None
     for _ in range(repeats):
         start = time.perf_counter()
         result = _run_implementation(samples, case, implementation)
         durations.append(time.perf_counter() - start)
+        result_shape = result.shape
+        del result
 
-    assert result is not None
+    assert result_shape is not None
     print(
         json.dumps(
             {
                 "median_seconds": statistics.median(durations),
-                "shape": result.shape,
+                "shape": result_shape,
             }
         )
     )
@@ -170,12 +172,16 @@ def _measure_in_subprocess(
         "--repeats",
         str(repeats),
     ]
+    # This is a structured argv invocation with shell execution disabled.
+    # The script, case, implementation, and positive integer repeat count are
+    # all controlled by this benchmark; no user text is interpreted by a shell.
     child = subprocess.Popen(
         command,
         cwd=script.parents[1],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
+        shell=False,
     )
     process = psutil.Process(child.pid)
     peak_rss = 0

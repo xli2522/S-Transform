@@ -133,6 +133,15 @@ def test_batched_transform_handles_chunk_boundaries(monkeypatch, rows_per_chunk)
     if rows_per_chunk > 1:
         assert nonzero_rows % chunk_size != 0
 
+    observed_ifft_chunk_sizes = []
+    original_ifft = transform_core.fft.ifft
+
+    def record_ifft_chunk_size(values, *args, **kwargs):
+        observed_ifft_chunk_sizes.append(values.shape[0])
+        return original_ifft(values, *args, **kwargs)
+
+    monkeypatch.setattr(transform_core.fft, "ifft", record_ifft_chunk_size)
+
     rng = np.random.default_rng(109)
     samples = rng.standard_normal(n_samples) + 1j * rng.standard_normal(n_samples)
     transform = s_transform(
@@ -140,6 +149,12 @@ def test_batched_transform_handles_chunk_boundaries(monkeypatch, rows_per_chunk)
         sample_rate=n_samples,
         frequency_range=(-n_samples / 2, n_samples / 2),
     )
+
+    expected_chunk_sizes = [
+        min(rows_per_chunk, nonzero_rows - start)
+        for start in range(0, nonzero_rows, rows_per_chunk)
+    ]
+    assert observed_ifft_chunk_sizes == expected_chunk_sizes
 
     np.testing.assert_allclose(
         transform.data,
