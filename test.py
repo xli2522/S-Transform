@@ -18,9 +18,8 @@ import tempfile
 from pathlib import Path
 
 import numpy as np
-import matplotlib.pyplot as plt
 from scipy.signal import chirp
-from s import s_transform, inverse_s_transform
+from s_transform import inverse_s_transform, s_transform
 
 
 IMAGE_DIR = Path(__file__).with_name("img")
@@ -46,9 +45,15 @@ def _save_figure_atomically(figure, output_path: Path, *, dpi: int = 150) -> Non
 
 
 def test_s_transform():
-    """
-    Test the S-Transform and its inverse on a quadratic chirp signal.
-    """
+    """Test the S-Transform and its inverse on a quadratic chirp signal."""
+    try:
+        import matplotlib.pyplot as plt
+    except ModuleNotFoundError as exc:
+        raise RuntimeError(
+            "The plotting demo requires Matplotlib. Install it with "
+            '`python -m pip install ".[plot]"`.'
+        ) from exc
+
     # Time vector and sampling rate
     dt = 0.001
     t_end = 3.0
@@ -68,7 +73,7 @@ def test_s_transform():
     image = axis.pcolormesh(
         st.times,
         st.frequencies[display_mask],
-        np.abs(np.asarray(st)[display_mask]),
+        np.abs(st.data[display_mask]),
         shading='auto',
     )
     axis.set_title('Original Spectrogram (0–300 Hz)')
@@ -84,7 +89,7 @@ def test_s_transform():
     plt.close(fig)
 
     # Inverse S-Transform
-    x_rec, fft_rec = inverse_s_transform(st)
+    x_rec, _ = inverse_s_transform(st)
 
     # The inverse restores the conjugate negative-frequency bins for real input.
     x_rec_comp = x_rec.real
@@ -119,14 +124,14 @@ def test_s_transform():
     st_rec = s_transform(
         x_rec.real,
         sample_rate=fs,
-        freq_range=(0.0, 500.0),
-        freq_step=fs / x_rec.size
+        frequency_range=(0.0, 500.0),
+        frequency_step=fs / x_rec.size,
     )
     fig, axis = plt.subplots(figsize=(8, 5))
     image = axis.pcolormesh(
         st_rec.times,
         st_rec.frequencies,
-        np.abs(np.asarray(st_rec)),
+        np.abs(st_rec.data),
         shading='auto',
     )
     axis.set_title('Recovered Spectrogram')
