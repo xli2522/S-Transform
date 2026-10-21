@@ -10,11 +10,11 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import TypedDict
+from typing import ClassVar, TypedDict
 
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
-from scipy import fft, signal
+from scipy import fft, signal  # type: ignore[import-untyped]
 
 __all__ = ["STransform", "s_transform", "inverse_s_transform"]
 
@@ -149,7 +149,7 @@ class STransform:
     input_length: int
     real_input: bool
 
-    __hash__ = None
+    __hash__: ClassVar[None] = None
 
     def __post_init__(self) -> None:
         (
@@ -208,7 +208,10 @@ class STransform:
     @property
     def frequencies(self) -> NDArray[np.float64]:
         """Actual frequency represented by each transform row, in hertz."""
-        return self.signed_frequency_indices * self.frequency_resolution
+        return np.asarray(
+            self.signed_frequency_indices * self.frequency_resolution,
+            dtype=np.float64,
+        )
 
     @property
     def times(self) -> NDArray[np.float64]:
@@ -589,6 +592,7 @@ def inverse_s_transform(
         frequency_indices_arr = metadata_indices.copy()
         inferred_real = metadata.real_input
     else:
+        provided_indices: ArrayLike
         if frequency_indices is None:
             start = (
                 0
