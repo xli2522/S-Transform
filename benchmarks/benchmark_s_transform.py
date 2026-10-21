@@ -8,13 +8,11 @@ fresh process so peak RSS measurements are comparable.
 from __future__ import annotations
 
 import argparse
-import json
+import multiprocessing
 import statistics
-import subprocess
-import sys
 import time
 from dataclasses import dataclass
-from pathlib import Path
+from queue import Empty
 from typing import Any
 
 import numpy as np
@@ -132,7 +130,12 @@ def _run_implementation(
     ).data
 
 
-def _worker(case: BenchmarkCase, implementation: str, repeats: int) -> None:
+def _worker(
+    case: BenchmarkCase,
+    implementation: str,
+    repeats: int,
+    result_queue: Any,
+) -> None:
     samples = _make_signal(case)
     _run_implementation(samples, case, implementation)
     durations = []
@@ -145,93 +148,66 @@ def _worker(case: BenchmarkCase, implementation: str, repeats: int) -> None:
         del result
 
     assert result_shape is not None
-    print(
-        json.dumps(
-            {
-                "median_seconds": statistics.median(durations),
-                "shape": result_shape,
-            }
-        )
+    result_queue.put(
+        {
+            "median_seconds": statistics.median(durations),
+            "shape": result_shape,
+        }
     )
 
 
-def _measure_in_subprocess(
-    script: Path,
+def _measure_in_worker_process(
     case: BenchmarkCase,
     implementation: str,
     repeats: int,
 ) -> tuple[dict[str, Any], int]:
-    command = [
-        sys.executable,
-        str(script),
-        "--worker",
-        "--case",
-        case.name,
-        "--implementation",
-        implementation,
-        "--repeats",
-        str(repeats),
-    ]
-    # This is a structured argv invocation with shell execution disabled.
-    # The script, case, implementation, and positive integer repeat count are
-    # all controlled by this benchmark; no user text is interpreted by a shell.
-    child = subprocess.Popen(
-        command,
-        cwd=script.parents[1],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        shell=False,
+    context = multiprocessing.get_context("spawn")
+    result_queue = context.Queue()
+    child = context.Process(
+        target=_worker,
+        args=(case, implementation, repeats, result_queue),
     )
+    child.start()
     process = psutil.Process(child.pid)
     peak_rss = 0
-    while child.poll() is None:
+    while child.is_alive():
         try:
             peak_rss = max(peak_rss, process.memory_info().rss)
         except psutil.NoSuchProcess:
             break
         time.sleep(0.001)
 
-    stdout, stderr = child.communicate()
-    if child.returncode:
-        raise RuntimeError(stderr.strip() or f"worker exited {child.returncode}")
-    return json.loads(stdout), peak_rss
+    child.join()
+    if child.exitcode:
+        raise RuntimeError(f"benchmark worker exited with code {child.exitcode}")
+    try:
+        result = result_queue.get(timeout=1)
+    except Empty as exc:
+        raise RuntimeError("benchmark worker returned no measurements") from exc
+    finally:
+        result_queue.close()
+        result_queue.join_thread()
+    return result, peak_rss
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--repeats", type=int, default=5)
-    parser.add_argument("--worker", action="store_true")
-    parser.add_argument("--case", choices=[case.name for case in CASES])
-    parser.add_argument(
-        "--implementation",
-        choices=["reference", "batched"],
-    )
     args = parser.parse_args()
     if args.repeats <= 0:
         parser.error("--repeats must be positive")
 
-    if args.worker:
-        if args.case is None or args.implementation is None:
-            parser.error("worker mode requires --case and --implementation")
-        case = next(case for case in CASES if case.name == args.case)
-        _worker(case, args.implementation, args.repeats)
-        return
-
-    script = Path(__file__).resolve()
     print(
         "case              reference(s)  batched(s)  speedup  "
         "peak RSS ref/batched (MiB)"
     )
     for case in CASES:
-        reference, reference_rss = _measure_in_subprocess(
-            script,
+        reference, reference_rss = _measure_in_worker_process(
             case,
             "reference",
             args.repeats,
         )
-        batched, batched_rss = _measure_in_subprocess(
-            script,
+        batched, batched_rss = _measure_in_worker_process(
             case,
             "batched",
             args.repeats,
