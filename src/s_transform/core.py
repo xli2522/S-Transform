@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import ClassVar, TypedDict
+from typing import TypedDict
 
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
@@ -149,7 +149,9 @@ class STransform:
     input_length: int
     real_input: bool
 
-    __hash__: ClassVar[None] = None
+    def __hash__(self) -> int:
+        """Keep the wrapper unhashable because it owns mutable arrays."""
+        raise TypeError(f"unhashable type: {type(self).__name__!r}")
 
     def __post_init__(self) -> None:
         (
