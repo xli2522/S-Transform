@@ -49,6 +49,12 @@ the selected modulo-`N` FFT bins are available as `st.frequency_indices`, while
 `st.signed_frequency_indices` exposes their signed mathematical indices when a
 signed range is requested.
 
+For plotting and inspection, `st.times`, `st.frequencies`, `st.duration`,
+`st.time_step`, `st.frequency_resolution`, `st.frequency_range`, and
+`st.time_range` expose the physical coordinates without reconstructing them
+from array shapes. `st.is_downsampled` indicates whether the time axis has
+fewer columns than the input.
+
 For complex signals with negative-frequency content, request the signed range
 explicitly. The canonical FFT ordering uses the positive Nyquist bin for even
 lengths and represents all other negative bins with signed frequencies:
@@ -85,9 +91,7 @@ For a plain ndarray copied from a transform, pass the metadata explicitly:
 ```python
 x_recovered, spectrum_recovered = inverse_s_transform(
     np.asarray(st),
-    frequency_indices=st.frequency_indices,
-    original_length=st.input_length,
-    real_output=st.real_input,
+    **st.inverse_kwargs,
 )
 ```
 

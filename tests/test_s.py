@@ -42,6 +42,29 @@ def test_frequency_step_preserves_actual_fft_bin_indices():
     np.testing.assert_allclose(np.fft.fft(transform[1])[0], -16j, atol=1e-10)
 
 
+def test_transform_exposes_physical_axis_metadata():
+    transform = s_transform(
+        np.ones(16),
+        sample_rate=32,
+        freq_range=(-16, 16),
+        downsample=5,
+    )
+
+    assert transform.duration == 0.5
+    assert transform.time_step == 0.1
+    assert transform.frequency_resolution == 2.0
+    assert transform.frequency_range == (-14.0, 16.0)
+    assert transform.time_range == (0.0, 0.4)
+    assert transform.is_downsampled
+
+    np.testing.assert_array_equal(
+        transform.inverse_kwargs["frequency_indices"],
+        transform.frequency_indices,
+    )
+    assert transform.inverse_kwargs["original_length"] == 16
+    assert transform.inverse_kwargs["real_output"] is True
+
+
 def test_signed_frequency_range_round_trips_complex_signal():
     n_samples = 32
     sample_rate = 32.0
@@ -115,6 +138,11 @@ def test_odd_downsample_is_supported_and_metadata_survives_inverse():
 def test_invalid_parameters_raise_value_error(kwargs):
     with pytest.raises((TypeError, ValueError)):
         s_transform(np.ones(16), **kwargs)
+
+
+def test_scalar_frequency_range_has_a_friendly_error():
+    with pytest.raises(TypeError, match="two-item sequence"):
+        s_transform(np.ones(16), sample_rate=16, freq_range=4)
 
 
 def test_multidimensional_input_is_rejected():

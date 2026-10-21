@@ -104,6 +104,52 @@ class STransformArray(np.ndarray):
             self.shape[1] * self.sample_rate
         )
 
+    @property
+    def duration(self) -> float:
+        """Duration of the original signal, in seconds."""
+        self._require_metadata()
+        return self.input_length / self.sample_rate
+
+    @property
+    def time_step(self) -> float:
+        """Spacing between adjacent transform columns, in seconds."""
+        self._require_metadata()
+        return self.duration / self.shape[1]
+
+    @property
+    def frequency_resolution(self) -> float:
+        """Spacing between adjacent raw FFT bins, in hertz."""
+        self._require_metadata()
+        return self.sample_rate / self.input_length
+
+    @property
+    def frequency_range(self) -> Tuple[float, float]:
+        """Minimum and maximum represented frequencies, in hertz."""
+        frequencies = self.frequencies
+        return float(frequencies[0]), float(frequencies[-1])
+
+    @property
+    def time_range(self) -> Tuple[float, float]:
+        """First and last represented time coordinates, in seconds."""
+        times = self.times
+        return float(times[0]), float(times[-1])
+
+    @property
+    def is_downsampled(self) -> bool:
+        """Whether the transform has fewer time columns than the input."""
+        self._require_metadata()
+        return self.shape[1] != self.input_length
+
+    @property
+    def inverse_kwargs(self) -> dict[str, object]:
+        """Metadata arguments for inverting a plain ndarray copy."""
+        self._require_metadata()
+        return {
+            "frequency_indices": self.frequency_indices.copy(),
+            "original_length": self.input_length,
+            "real_output": self.real_input,
+        }
+
 
 def _validate_input(
     ts: ArrayLike,
@@ -136,8 +182,11 @@ def _validate_input(
     if freq_range is None:
         fmin, fmax = 0.0, nyquist
     else:
-        if len(freq_range) != 2:
-            raise ValueError("freq_range must contain exactly two values")
+        try:
+            if len(freq_range) != 2:
+                raise ValueError("freq_range must contain exactly two values")
+        except TypeError as exc:
+            raise TypeError("freq_range must be a two-item sequence") from exc
         try:
             fmin, fmax = (float(freq_range[0]), float(freq_range[1]))
         except (TypeError, ValueError) as exc:
