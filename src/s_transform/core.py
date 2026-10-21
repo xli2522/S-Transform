@@ -18,6 +18,8 @@ from scipy import fft, signal  # type: ignore[import-untyped]
 
 __all__ = ["STransform", "s_transform", "inverse_s_transform"]
 
+_SCRATCH_MEMORY_BUDGET_BYTES = 32 * 1024 * 1024
+
 
 class InverseKwargs(TypedDict):
     """Keyword arguments packaged for inversion of a plain ndarray copy."""
@@ -373,6 +375,26 @@ def _window_normal(
     return factor * np.exp(-2.0 * np.pi**2 * (signed_bins / freq) ** 2)
 
 
+def _frequency_chunk_size(
+    n_samples: int,
+    output_columns: int,
+    n_frequency_rows: int,
+) -> int:
+    """Choose a batch size targeting a bounded FFT/resampling workspace.
+
+    The per-row estimate includes shifted complex data, the real window, and
+    temporary FFT/resampling storage. The one-row minimum may exceed the target.
+    """
+    estimated_bytes_per_row = 64 * (n_samples + output_columns)
+    return max(
+        1,
+        min(
+            n_frequency_rows,
+            _SCRATCH_MEMORY_BUDGET_BYTES // estimated_bytes_per_row,
+        ),
+    )
+
+
 def s_transform(
     ts: ArrayLike,
     sample_rate: float,
@@ -476,27 +498,65 @@ def s_transform(
         (frequency_indices.size, output_columns),
         dtype=np.complex128,
     )
-    for row_index, frequency_index in enumerate(frequency_indices):
-        if frequency_index == 0:
-            row = np.full(n_samples, spectrum[0] / n_samples, dtype=np.complex128)
-        else:
-            signed_frequency_index = (
-                frequency_index
-                if frequency_index <= max_bin
-                else frequency_index - n_samples
-            )
-            shifted_spectrum = spectrum[
-                (frequency_index + np.arange(n_samples, dtype=np.int64)) % n_samples
-            ]
-            window = _window_normal(
-                n_samples,
-                abs(signed_frequency_index) / alpha,
-            )
-            row = fft.ifft(shifted_spectrum * window)
+    dc_rows = np.flatnonzero(frequency_indices == 0)
+    if dc_rows.size:
+        dc_value = spectrum[0] / n_samples
         if output_columns == n_samples:
-            transform[row_index] = row
+            transform[dc_rows] = dc_value
         else:
-            transform[row_index] = signal.resample(row, output_columns)
+            dc_row = signal.resample(
+                np.full(n_samples, dc_value, dtype=np.complex128),
+                output_columns,
+            )
+            transform[dc_rows] = dc_row
+
+    nonzero_rows = np.flatnonzero(frequency_indices != 0)
+    if nonzero_rows.size:
+        chunk_size = _frequency_chunk_size(
+            n_samples,
+            output_columns,
+            nonzero_rows.size,
+        )
+        sample_bins = np.arange(n_samples, dtype=np.int64)
+        signed_sample_bins = np.where(
+            sample_bins <= max_bin,
+            sample_bins,
+            sample_bins - n_samples,
+        )
+
+        for chunk_start in range(0, nonzero_rows.size, chunk_size):
+            row_positions = nonzero_rows[chunk_start : chunk_start + chunk_size]
+            chunk_frequency_indices = frequency_indices[row_positions]
+            signed_frequency_bins = np.where(
+                chunk_frequency_indices <= max_bin,
+                chunk_frequency_indices,
+                chunk_frequency_indices - n_samples,
+            )
+
+            shifted_spectra = np.empty(
+                (row_positions.size, n_samples),
+                dtype=np.complex128,
+            )
+            for chunk_row, frequency_index in enumerate(chunk_frequency_indices):
+                shifted_spectra[chunk_row] = np.roll(spectrum, -int(frequency_index))
+
+            windows = np.empty(shifted_spectra.shape, dtype=np.float64)
+            frequency_scales = np.abs(signed_frequency_bins).astype(np.float64) / alpha
+            np.divide(
+                signed_sample_bins[np.newaxis, :],
+                frequency_scales[:, np.newaxis],
+                out=windows,
+            )
+            np.square(windows, out=windows)
+            windows *= -2.0 * np.pi**2
+            np.exp(windows, out=windows)
+            shifted_spectra *= windows
+            del windows
+
+            rows = fft.ifft(shifted_spectra, axis=-1, overwrite_x=True)
+            if output_columns != n_samples:
+                rows = signal.resample(rows, output_columns, axis=-1)
+            transform[row_positions] = rows
 
     return STransform(
         data=transform,

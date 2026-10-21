@@ -4,8 +4,53 @@ from dataclasses import FrozenInstanceError
 
 import numpy as np
 import pytest
+from scipy import fft, signal
 
 from s_transform import STransform, inverse_s_transform, s_transform
+from s_transform import core as transform_core
+
+
+def _rowwise_reference(ts, transform, alpha=1.0):
+    """Reproduce the pre-batching frequency-row implementation for tests."""
+    samples = np.asarray(ts, dtype=np.complex128)
+    n_samples = samples.size
+    max_bin = n_samples // 2
+    signed_bins = np.arange(n_samples, dtype=np.int64)
+    signed_bins = np.where(
+        signed_bins <= max_bin,
+        signed_bins,
+        signed_bins - n_samples,
+    )
+    spectrum = fft.fft(samples)
+    output = np.empty_like(transform.data)
+
+    for row_index, frequency_index in enumerate(transform.frequency_indices):
+        if frequency_index == 0:
+            row = np.full(n_samples, spectrum[0] / n_samples, dtype=np.complex128)
+        else:
+            signed_frequency_index = (
+                frequency_index
+                if frequency_index <= max_bin
+                else frequency_index - n_samples
+            )
+            shifted = spectrum[
+                (frequency_index + np.arange(n_samples, dtype=np.int64))
+                % n_samples
+            ]
+            window = np.exp(
+                -2.0
+                * np.pi**2
+                * (
+                    signed_bins
+                    / (abs(signed_frequency_index) / alpha)
+                )
+                ** 2
+            )
+            row = fft.ifft(shifted * window)
+        if output.shape[1] != n_samples:
+            row = signal.resample(row, output.shape[1])
+        output[row_index] = row
+    return output
 
 
 def test_default_transform_contains_dc_through_nyquist():
@@ -17,6 +62,97 @@ def test_default_transform_contains_dc_through_nyquist():
     np.testing.assert_array_equal(transform.frequency_indices, np.arange(9))
     np.testing.assert_allclose(transform.frequencies, np.arange(9))
     np.testing.assert_allclose(transform.data[0], 1.0)
+
+
+@pytest.mark.parametrize(
+    (
+        "n_samples",
+        "is_complex",
+        "frequency_range",
+        "frequency_step",
+        "alpha",
+        "output_length",
+    ),
+    [
+        (8, False, None, None, 1.0, None),
+        (9, False, None, 2.0, 0.7, 5),
+        (8, True, (-4.0, 4.0), None, 1.2, 12),
+        (9, True, (-3.1, 2.9), 1.5, 1.4, None),
+    ],
+)
+def test_batched_transform_matches_rowwise_reference(
+    n_samples,
+    is_complex,
+    frequency_range,
+    frequency_step,
+    alpha,
+    output_length,
+):
+    rng = np.random.default_rng(n_samples)
+    samples = rng.standard_normal(n_samples)
+    if is_complex:
+        samples = samples + 1j * rng.standard_normal(n_samples)
+
+    transform = s_transform(
+        samples,
+        sample_rate=n_samples,
+        frequency_range=frequency_range,
+        frequency_step=frequency_step,
+        alpha=alpha,
+        output_length=output_length,
+    )
+
+    np.testing.assert_allclose(
+        transform.data,
+        _rowwise_reference(samples, transform, alpha),
+        rtol=1e-12,
+        atol=1e-10,
+    )
+
+
+@pytest.mark.parametrize("rows_per_chunk", [1, 3])
+def test_batched_transform_handles_chunk_boundaries(monkeypatch, rows_per_chunk):
+    n_samples = 9
+    nonzero_rows = n_samples - 1
+    bytes_per_row = 64 * (n_samples + n_samples)
+    monkeypatch.setattr(
+        transform_core,
+        "_SCRATCH_MEMORY_BUDGET_BYTES",
+        rows_per_chunk * bytes_per_row,
+    )
+    chunk_size = transform_core._frequency_chunk_size(
+        n_samples,
+        n_samples,
+        nonzero_rows,
+    )
+    assert chunk_size == rows_per_chunk
+    assert (nonzero_rows + chunk_size - 1) // chunk_size >= 2
+    assert chunk_size * bytes_per_row <= (
+        transform_core._SCRATCH_MEMORY_BUDGET_BYTES
+    )
+    if rows_per_chunk > 1:
+        assert nonzero_rows % chunk_size != 0
+
+    rng = np.random.default_rng(109)
+    samples = rng.standard_normal(n_samples) + 1j * rng.standard_normal(n_samples)
+    transform = s_transform(
+        samples,
+        sample_rate=n_samples,
+        frequency_range=(-n_samples / 2, n_samples / 2),
+    )
+
+    np.testing.assert_allclose(
+        transform.data,
+        _rowwise_reference(samples, transform),
+        rtol=1e-12,
+        atol=1e-10,
+    )
+
+
+def test_frequency_chunk_sizing_keeps_one_row_below_budget(monkeypatch):
+    monkeypatch.setattr(transform_core, "_SCRATCH_MEMORY_BUDGET_BYTES", 1)
+
+    assert transform_core._frequency_chunk_size(1024, 2048, 10) == 1
 
 
 def test_full_real_transform_round_trips_without_manual_factor():

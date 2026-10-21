@@ -146,6 +146,20 @@ multi-gigabyte allocations, `s_transform` limits the output to 20 million
 complex elements by default; pass `max_output_elements=None` only when a
 larger transform is intentional.
 
+## Performance benchmark
+
+Install the optional benchmark dependency and compare the batched transform
+with the previous row-wise algorithm:
+
+```bash
+python -m pip install ".[benchmark]"
+python benchmarks/benchmark_s_transform.py --repeats 5
+```
+
+The script reports median runtime, speedup, and sampled peak process memory for
+dense real, full signed complex, and resampled transforms. Results depend on
+the machine and are not used as CI timing thresholds.
+
 ## Migration from the pre-package API
 
 This is a clean-break `0.1.0` release:
