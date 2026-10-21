@@ -57,12 +57,31 @@ def test_transform_exposes_physical_axis_metadata():
     assert transform.time_range == (0.0, 0.4)
     assert transform.is_downsampled
 
+    upsampled = s_transform(
+        np.ones(16),
+        sample_rate=32,
+        downsample=24,
+    )
+    assert not upsampled.is_downsampled
+
     np.testing.assert_array_equal(
         transform.inverse_kwargs["frequency_indices"],
         transform.frequency_indices,
     )
     assert transform.inverse_kwargs["original_length"] == 16
     assert transform.inverse_kwargs["real_output"] is True
+
+
+def test_frequency_range_is_order_independent():
+    transform = STransformArray(
+        np.zeros((3, 8), dtype=complex),
+        frequency_indices=[3, 1, 2],
+        sample_rate=8,
+        input_length=8,
+        real_input=False,
+    )
+
+    assert transform.frequency_range == (1.0, 3.0)
 
 
 def test_signed_frequency_range_round_trips_complex_signal():

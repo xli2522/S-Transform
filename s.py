@@ -126,7 +126,7 @@ class STransformArray(np.ndarray):
     def frequency_range(self) -> Tuple[float, float]:
         """Minimum and maximum represented frequencies, in hertz."""
         frequencies = self.frequencies
-        return float(frequencies[0]), float(frequencies[-1])
+        return float(np.min(frequencies)), float(np.max(frequencies))
 
     @property
     def time_range(self) -> Tuple[float, float]:
@@ -138,7 +138,7 @@ class STransformArray(np.ndarray):
     def is_downsampled(self) -> bool:
         """Whether the transform has fewer time columns than the input."""
         self._require_metadata()
-        return self.shape[1] != self.input_length
+        return self.shape[1] < self.input_length
 
     @property
     def inverse_kwargs(self) -> dict[str, object]:
