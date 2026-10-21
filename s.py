@@ -21,13 +21,21 @@ bins.
 
 from __future__ import annotations
 
-from typing import Optional, Sequence, Tuple
+from typing import Optional, Sequence, Tuple, TypedDict
 
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
 from scipy import fft, signal
 
 __all__ = ["STransformArray", "s_transform", "inverse_s_transform"]
+
+
+class InverseKwargs(TypedDict):
+    """Keyword arguments packaged for inversion of a plain ndarray copy."""
+
+    frequency_indices: NDArray[np.int64]
+    original_length: int
+    real_output: bool
 
 
 class STransformArray(np.ndarray):
@@ -52,8 +60,22 @@ class STransformArray(np.ndarray):
         input_length: int,
         real_input: bool,
     ) -> "STransformArray":
-        obj = np.asarray(data, dtype=np.complex128).view(cls)
-        obj.frequency_indices = np.asarray(frequency_indices, dtype=np.int64)
+        data_arr = np.asarray(data, dtype=np.complex128)
+        if data_arr.ndim != 2:
+            raise ValueError("data must be a two-dimensional transform")
+        if 0 in data_arr.shape:
+            raise ValueError("data must have non-empty frequency and time axes")
+
+        frequency_indices_arr = np.asarray(frequency_indices, dtype=np.int64)
+        if frequency_indices_arr.ndim != 1:
+            raise ValueError("frequency_indices must be one-dimensional")
+        if frequency_indices_arr.size != data_arr.shape[0]:
+            raise ValueError(
+                "frequency_indices must contain one FFT bin per transform row"
+            )
+
+        obj = data_arr.view(cls)
+        obj.frequency_indices = frequency_indices_arr
         obj.sample_rate = float(sample_rate)
         obj.input_length = int(input_length)
         obj.real_input = bool(real_input)
@@ -104,6 +126,70 @@ class STransformArray(np.ndarray):
             self.shape[1] * self.sample_rate
         )
 
+    @property
+    def duration(self) -> float:
+        """Duration of the original signal, in seconds."""
+        self._require_metadata()
+        return self.input_length / self.sample_rate
+
+    @property
+    def time_step(self) -> float:
+        """Spacing between adjacent transform columns, in seconds."""
+        self._require_metadata()
+        return self.duration / self.shape[1]
+
+    @property
+    def frequency_resolution(self) -> float:
+        """Spacing between adjacent raw FFT bins, in hertz."""
+        self._require_metadata()
+        return self.sample_rate / self.input_length
+
+    @property
+    def frequency_range(self) -> Tuple[float, float]:
+        """Minimum and maximum represented frequencies, in hertz."""
+        self._require_metadata()
+        nyquist_index = self.input_length // 2
+        minimum = maximum = int(self.frequency_indices[0])
+        if minimum > nyquist_index:
+            minimum -= self.input_length
+            maximum = minimum
+        for raw_index in self.frequency_indices[1:]:
+            signed_index = int(raw_index)
+            if signed_index > nyquist_index:
+                signed_index -= self.input_length
+            minimum = min(minimum, signed_index)
+            maximum = max(maximum, signed_index)
+        scale = self.frequency_resolution
+        return minimum * scale, maximum * scale
+
+    @property
+    def time_range(self) -> Tuple[float, float]:
+        """First and last represented time coordinates, in seconds."""
+        self._require_metadata()
+        return 0.0, (self.shape[1] - 1) * self.time_step
+
+    @property
+    def is_downsampled(self) -> bool:
+        """Whether the transform has fewer time columns than the input."""
+        self._require_metadata()
+        return self.shape[1] < self.input_length
+
+    @property
+    def is_upsampled(self) -> bool:
+        """Whether the transform has more time columns than the input."""
+        self._require_metadata()
+        return self.shape[1] > self.input_length
+
+    @property
+    def inverse_kwargs(self) -> InverseKwargs:
+        """Metadata arguments for inverting a plain ndarray copy."""
+        self._require_metadata()
+        return {
+            "frequency_indices": self.frequency_indices.copy(),
+            "original_length": self.input_length,
+            "real_output": self.real_input,
+        }
+
 
 def _validate_input(
     ts: ArrayLike,
@@ -136,8 +222,11 @@ def _validate_input(
     if freq_range is None:
         fmin, fmax = 0.0, nyquist
     else:
-        if len(freq_range) != 2:
-            raise ValueError("freq_range must contain exactly two values")
+        try:
+            if len(freq_range) != 2:
+                raise ValueError("freq_range must contain exactly two values")
+        except TypeError as exc:
+            raise TypeError("freq_range must be a two-item sequence") from exc
         try:
             fmin, fmax = (float(freq_range[0]), float(freq_range[1]))
         except (TypeError, ValueError) as exc:
