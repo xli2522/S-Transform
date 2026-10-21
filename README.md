@@ -53,7 +53,9 @@ For plotting and inspection, `st.times`, `st.frequencies`, `st.duration`,
 `st.time_step`, `st.frequency_resolution`, `st.frequency_range`, and
 `st.time_range` expose the physical coordinates without reconstructing them
 from array shapes. `st.is_downsampled` indicates whether the time axis has
-fewer columns than the input.
+fewer columns than the input, while `st.is_upsampled` indicates more columns.
+Upsampling resamples the transform's time axis; it does not add information to
+the original signal.
 
 For complex signals with negative-frequency content, request the signed range
 explicitly. The canonical FFT ordering uses the positive Nyquist bin for even

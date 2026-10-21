@@ -141,6 +141,12 @@ class STransformArray(np.ndarray):
         return self.shape[1] < self.input_length
 
     @property
+    def is_upsampled(self) -> bool:
+        """Whether the transform has more time columns than the input."""
+        self._require_metadata()
+        return self.shape[1] > self.input_length
+
+    @property
     def inverse_kwargs(self) -> dict[str, object]:
         """Metadata arguments for inverting a plain ndarray copy."""
         self._require_metadata()

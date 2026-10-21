@@ -63,6 +63,8 @@ def test_transform_exposes_physical_axis_metadata():
         downsample=24,
     )
     assert not upsampled.is_downsampled
+    assert upsampled.is_upsampled
+    assert not transform.is_upsampled
 
     np.testing.assert_array_equal(
         transform.inverse_kwargs["frequency_indices"],
