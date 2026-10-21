@@ -18,7 +18,6 @@ import tempfile
 from pathlib import Path
 
 import numpy as np
-import matplotlib.pyplot as plt
 from scipy.signal import chirp
 from s_transform import inverse_s_transform, s_transform
 
@@ -46,9 +45,15 @@ def _save_figure_atomically(figure, output_path: Path, *, dpi: int = 150) -> Non
 
 
 def test_s_transform():
-    """
-    Test the S-Transform and its inverse on a quadratic chirp signal.
-    """
+    """Test the S-Transform and its inverse on a quadratic chirp signal."""
+    try:
+        import matplotlib.pyplot as plt
+    except ModuleNotFoundError as exc:
+        raise RuntimeError(
+            "The plotting demo requires Matplotlib. Install it with "
+            '`python -m pip install ".[plot]"`.'
+        ) from exc
+
     # Time vector and sampling rate
     dt = 0.001
     t_end = 3.0

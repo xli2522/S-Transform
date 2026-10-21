@@ -74,6 +74,8 @@ extra, then plot the physical axes directly:
 python -m pip install ".[plot]"
 ```
 
+The repository's `test.py` plotting demo uses this same optional extra.
+
 ```python
 import matplotlib.pyplot as plt
 
