@@ -86,6 +86,18 @@ def test_frequency_range_is_order_independent():
     assert transform.frequency_range == (1.0, 3.0)
 
 
+@pytest.mark.parametrize("shape", [(0, 8), (3, 0)])
+def test_transform_rejects_empty_axes(shape):
+    with pytest.raises(ValueError, match="non-empty"):
+        STransformArray(
+            np.zeros(shape, dtype=complex),
+            frequency_indices=np.arange(shape[0]),
+            sample_rate=8,
+            input_length=8,
+            real_input=False,
+        )
+
+
 def test_signed_frequency_range_round_trips_complex_signal():
     n_samples = 32
     sample_rate = 32.0

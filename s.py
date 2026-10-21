@@ -21,13 +21,21 @@ bins.
 
 from __future__ import annotations
 
-from typing import Optional, Sequence, Tuple
+from typing import Optional, Sequence, Tuple, TypedDict
 
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
 from scipy import fft, signal
 
 __all__ = ["STransformArray", "s_transform", "inverse_s_transform"]
+
+
+class InverseKwargs(TypedDict):
+    """Keyword arguments packaged for inversion of a plain ndarray copy."""
+
+    frequency_indices: NDArray[np.int64]
+    original_length: int
+    real_output: bool
 
 
 class STransformArray(np.ndarray):
@@ -52,8 +60,22 @@ class STransformArray(np.ndarray):
         input_length: int,
         real_input: bool,
     ) -> "STransformArray":
-        obj = np.asarray(data, dtype=np.complex128).view(cls)
-        obj.frequency_indices = np.asarray(frequency_indices, dtype=np.int64)
+        data_arr = np.asarray(data, dtype=np.complex128)
+        if data_arr.ndim != 2:
+            raise ValueError("data must be a two-dimensional transform")
+        if 0 in data_arr.shape:
+            raise ValueError("data must have non-empty frequency and time axes")
+
+        frequency_indices_arr = np.asarray(frequency_indices, dtype=np.int64)
+        if frequency_indices_arr.ndim != 1:
+            raise ValueError("frequency_indices must be one-dimensional")
+        if frequency_indices_arr.size != data_arr.shape[0]:
+            raise ValueError(
+                "frequency_indices must contain one FFT bin per transform row"
+            )
+
+        obj = data_arr.view(cls)
+        obj.frequency_indices = frequency_indices_arr
         obj.sample_rate = float(sample_rate)
         obj.input_length = int(input_length)
         obj.real_input = bool(real_input)
@@ -125,14 +147,26 @@ class STransformArray(np.ndarray):
     @property
     def frequency_range(self) -> Tuple[float, float]:
         """Minimum and maximum represented frequencies, in hertz."""
-        frequencies = self.frequencies
-        return float(np.min(frequencies)), float(np.max(frequencies))
+        self._require_metadata()
+        nyquist_index = self.input_length // 2
+        minimum = maximum = int(self.frequency_indices[0])
+        if minimum > nyquist_index:
+            minimum -= self.input_length
+            maximum = minimum
+        for raw_index in self.frequency_indices[1:]:
+            signed_index = int(raw_index)
+            if signed_index > nyquist_index:
+                signed_index -= self.input_length
+            minimum = min(minimum, signed_index)
+            maximum = max(maximum, signed_index)
+        scale = self.frequency_resolution
+        return minimum * scale, maximum * scale
 
     @property
     def time_range(self) -> Tuple[float, float]:
         """First and last represented time coordinates, in seconds."""
-        times = self.times
-        return float(times[0]), float(times[-1])
+        self._require_metadata()
+        return 0.0, (self.shape[1] - 1) * self.time_step
 
     @property
     def is_downsampled(self) -> bool:
@@ -147,7 +181,7 @@ class STransformArray(np.ndarray):
         return self.shape[1] > self.input_length
 
     @property
-    def inverse_kwargs(self) -> dict[str, object]:
+    def inverse_kwargs(self) -> InverseKwargs:
         """Metadata arguments for inverting a plain ndarray copy."""
         self._require_metadata()
         return {
