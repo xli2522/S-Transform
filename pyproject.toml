@@ -22,6 +22,9 @@ dependencies = [
 plot = [
     "matplotlib>=3.7",
 ]
+benchmark = [
+    "psutil>=5.9",
+]
 dev = [
     "build>=1.2",
     "mypy>=1.8",
