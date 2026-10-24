@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import TypedDict
+from typing import Literal, TypedDict
 
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
@@ -19,6 +19,9 @@ from scipy import fft, signal  # type: ignore[import-untyped]
 __all__ = ["STransform", "s_transform", "inverse_s_transform"]
 
 _SCRATCH_MEMORY_BUDGET_BYTES = 32 * 1024 * 1024
+_BOUNDARY_PADDING_SIGMAS = 6.0
+
+BoundaryMode = Literal["periodic", "zeros"]
 
 
 class InverseKwargs(TypedDict):
@@ -27,6 +30,8 @@ class InverseKwargs(TypedDict):
     frequency_indices: NDArray[np.int64]
     original_length: int
     real_output: bool
+    boundary: BoundaryMode
+    inverse_compatible: bool
 
 
 def _as_integer_scalar(value: object, name: str) -> int:
@@ -43,6 +48,17 @@ def _as_bool_scalar(value: object, name: str) -> bool:
     if not isinstance(value, (bool, np.bool_)):
         raise TypeError(f"{name} must be a boolean")
     return bool(value)
+
+
+def _normalize_boundary(value: object) -> BoundaryMode:
+    """Validate a supported S-transform boundary condition."""
+    if not isinstance(value, str):
+        raise ValueError("boundary must be 'periodic' or 'zeros'")
+    if value == "periodic":
+        return "periodic"
+    if value == "zeros":
+        return "zeros"
+    raise ValueError("boundary must be 'periodic' or 'zeros'")
 
 
 def _as_integer_array(values: ArrayLike, name: str) -> NDArray[np.int64]:
@@ -88,10 +104,18 @@ def _validate_transform_metadata(
     sample_rate: float,
     input_length: int,
     real_input: bool,
+    transform_length: int | None,
+    boundary: BoundaryMode,
+    boundary_padding: int,
+    inverse_compatible: bool,
 ) -> tuple[
     NDArray[np.complex128],
     NDArray[np.int64],
     float,
+    int,
+    bool,
+    int,
+    BoundaryMode,
     int,
     bool,
 ]:
@@ -113,9 +137,49 @@ def _validate_transform_metadata(
     if input_length_value <= 0:
         raise ValueError("input_length must be a positive integer")
 
+    transform_length_value = (
+        input_length_value
+        if transform_length is None
+        else _as_integer_scalar(transform_length, "transform_length")
+    )
+    if transform_length_value <= 0:
+        raise ValueError("transform_length must be a positive integer")
+    boundary_value = _normalize_boundary(boundary)
+    boundary_padding_value = _as_integer_scalar(
+        boundary_padding,
+        "boundary_padding",
+    )
+    if boundary_padding_value < 0:
+        raise ValueError("boundary_padding must be non-negative")
+    inverse_compatible_value = _as_bool_scalar(
+        inverse_compatible,
+        "inverse_compatible",
+    )
+
+    if boundary_value == "periodic":
+        if transform_length_value != input_length_value:
+            raise ValueError(
+                "periodic transforms must have transform_length equal to input_length"
+            )
+        if boundary_padding_value != 0 or not inverse_compatible_value:
+            raise ValueError(
+                "periodic transforms cannot have boundary padding or be marked "
+                "inverse-incompatible"
+            )
+    else:
+        if transform_length_value != input_length_value + 2 * boundary_padding_value:
+            raise ValueError(
+                "zero-boundary transform_length must include symmetric boundary_padding"
+            )
+        if inverse_compatible_value:
+            raise ValueError(
+                "zero-boundary transforms cropped to the input interval are not "
+                "compatible with inverse_s_transform"
+            )
+
     frequency_indices_arr = _normalize_frequency_indices(
         frequency_indices,
-        input_length_value,
+        transform_length_value,
         "frequency_indices",
     )
     if frequency_indices_arr.size != data_arr.shape[0]:
@@ -132,6 +196,10 @@ def _validate_transform_metadata(
         sample_rate_value,
         input_length_value,
         real_input_value,
+        transform_length_value,
+        boundary_value,
+        boundary_padding_value,
+        inverse_compatible_value,
     )
 
 
@@ -142,7 +210,9 @@ class STransform:
     ``data`` is a complex array with shape ``(n_frequencies, n_time)``.
     Metadata is stored separately from the numerical array so ordinary copies,
     slicing, and pickling do not silently alter or discard the transform's
-    interpretation.
+    interpretation. ``input_length`` describes the returned time interval;
+    ``transform_length`` describes the FFT period used for frequency-bin
+    metadata and can be longer for zero-boundary transforms.
     """
 
     data: NDArray[np.complex128]
@@ -150,10 +220,20 @@ class STransform:
     sample_rate: float
     input_length: int
     real_input: bool
+    transform_length: int | None = None
+    boundary: BoundaryMode = "periodic"
+    boundary_padding: int = 0
+    inverse_compatible: bool = True
 
     def __hash__(self) -> int:
         """Keep the wrapper unhashable because it owns mutable arrays."""
         raise TypeError(f"unhashable type: {type(self).__name__!r}")
+
+    @property
+    def _fft_length(self) -> int:
+        """FFT length, normalized to ``input_length`` after construction."""
+        assert self.transform_length is not None
+        return self.transform_length
 
     def __post_init__(self) -> None:
         (
@@ -162,12 +242,20 @@ class STransform:
             sample_rate,
             input_length,
             real_input,
+            transform_length,
+            boundary,
+            boundary_padding,
+            inverse_compatible,
         ) = _validate_transform_metadata(
             self.data,
             self.frequency_indices,
             self.sample_rate,
             self.input_length,
             self.real_input,
+            self.transform_length,
+            self.boundary,
+            self.boundary_padding,
+            self.inverse_compatible,
         )
         frequency_indices = frequency_indices.copy()
         frequency_indices.setflags(write=False)
@@ -176,6 +264,10 @@ class STransform:
         object.__setattr__(self, "sample_rate", sample_rate)
         object.__setattr__(self, "input_length", input_length)
         object.__setattr__(self, "real_input", real_input)
+        object.__setattr__(self, "transform_length", transform_length)
+        object.__setattr__(self, "boundary", boundary)
+        object.__setattr__(self, "boundary_padding", boundary_padding)
+        object.__setattr__(self, "inverse_compatible", inverse_compatible)
 
     def __eq__(self, other: object) -> bool:
         """Compare numerical data and metadata without ndarray ambiguity."""
@@ -187,6 +279,10 @@ class STransform:
             and self.sample_rate == other.sample_rate
             and self.input_length == other.input_length
             and self.real_input == other.real_input
+            and self.transform_length == other.transform_length
+            and self.boundary == other.boundary
+            and self.boundary_padding == other.boundary_padding
+            and self.inverse_compatible == other.inverse_compatible
         )
 
     def __array__(
@@ -204,9 +300,9 @@ class STransform:
     def signed_frequency_indices(self) -> NDArray[np.int64]:
         """Signed FFT-bin indices represented by each transform row."""
         return np.where(
-            self.frequency_indices <= self.input_length // 2,
+            self.frequency_indices <= self._fft_length // 2,
             self.frequency_indices,
-            self.frequency_indices - self.input_length,
+            self.frequency_indices - self._fft_length,
         )
 
     @property
@@ -235,20 +331,20 @@ class STransform:
     @property
     def frequency_resolution(self) -> float:
         """Spacing between adjacent raw FFT bins, in hertz."""
-        return self.sample_rate / self.input_length
+        return self.sample_rate / self._fft_length
 
     @property
     def frequency_range(self) -> tuple[float, float]:
         """Minimum and maximum represented frequencies, in hertz."""
-        nyquist_index = self.input_length // 2
+        nyquist_index = self._fft_length // 2
         minimum = maximum = int(self.frequency_indices[0])
         if minimum > nyquist_index:
-            minimum -= self.input_length
+            minimum -= self._fft_length
             maximum = minimum
         for raw_index in self.frequency_indices[1:]:
             signed_index = int(raw_index)
             if signed_index > nyquist_index:
-                signed_index -= self.input_length
+                signed_index -= self._fft_length
             minimum = min(minimum, signed_index)
             maximum = max(maximum, signed_index)
         scale = self.frequency_resolution
@@ -274,8 +370,10 @@ class STransform:
         """Metadata arguments for inverting a plain ndarray copy."""
         return {
             "frequency_indices": self.frequency_indices.copy(),
-            "original_length": self.input_length,
+            "original_length": self._fft_length,
             "real_output": self.real_input,
+            "boundary": self.boundary,
+            "inverse_compatible": self.inverse_compatible,
         }
 
 
@@ -359,6 +457,40 @@ def _validate_input(
     return ts_arr, sample_rate, fmin, fmax, frequency_step, output_length
 
 
+def _select_frequency_indices(
+    n_samples: int,
+    sample_rate: float,
+    fmin: float,
+    fmax: float,
+    frequency_step: float,
+) -> NDArray[np.int64]:
+    """Select canonical FFT bins in the requested signed-frequency range."""
+    frequency_resolution = sample_rate / n_samples
+    min_signed_bin = -((n_samples - 1) // 2)
+    max_signed_bin = n_samples // 2
+    start_bin = max(
+        min_signed_bin,
+        int(np.ceil(fmin / frequency_resolution - 1e-12)),
+    )
+    stop_bin = min(
+        max_signed_bin,
+        int(np.floor(fmax / frequency_resolution + 1e-12)),
+    )
+    if start_bin > stop_bin:
+        raise ValueError("frequency_range does not contain an available FFT bin")
+    step_bins = max(
+        1,
+        int(np.ceil(frequency_step / frequency_resolution - 1e-12)),
+    )
+    signed_frequency_indices = np.arange(
+        start_bin,
+        stop_bin + 1,
+        step_bins,
+        dtype=np.int64,
+    )
+    return np.mod(signed_frequency_indices, n_samples)
+
+
 def _window_normal(
     length: int,
     freq: float,
@@ -403,6 +535,8 @@ def s_transform(
     alpha: float = 1.0,
     output_length: int | None = None,
     max_output_elements: int | None = 20_000_000,
+    boundary: BoundaryMode = "periodic",
+    boundary_padding: int | None = None,
 ) -> STransform:
     """Compute the discrete Stockwell transform.
 
@@ -416,7 +550,8 @@ def s_transform(
         Signed frequency range in hertz. The default is ``(0, Nyquist)``.
     frequency_step : float, optional
         Requested frequency spacing in hertz. The actual spacing is rounded
-        up to an integer number of FFT bins. The default is one FFT bin.
+        up to an integer number of FFT bins. The default is one FFT bin for
+        the unpadded input; zero-boundary padding retains that requested spacing.
     alpha : float, optional
         Positive Gaussian width multiplier. For a nonzero frequency ``f``,
         the corresponding temporal Gaussian has standard deviation
@@ -426,10 +561,28 @@ def s_transform(
     output_length : int, optional
         Number of columns in the returned transform. The default is the input
         length. Values smaller than the input downsample the time axis; larger
-        values upsample it by Fourier resampling.
+        values upsample it. Periodic boundaries use Fourier resampling;
+        zero-extended boundaries use polyphase resampling with zero extension.
     max_output_elements : int or None, optional
         Safety limit for the number of complex output elements. Set to
         ``None`` to opt into an unbounded allocation for large transforms.
+    boundary : {"periodic", "zeros"}, optional
+        Boundary condition for the finite record. ``"periodic"`` preserves
+        the standard discrete S-transform and its wrap-around behavior.
+        ``"zeros"`` pads the record with zeros, computes on that extended
+        period, then returns only columns corresponding to the original input.
+        Zero-boundary results are not invertible with
+        :func:`inverse_s_transform`.
+    boundary_padding : int, optional
+        Symmetric zero-padding in samples when ``boundary="zeros"``. By
+        default, padding is six temporal Gaussian standard deviations at the
+        lowest nonzero frequency selected from the unpadded input grid. A
+        manually supplied value is treated as a minimum and rounded up as
+        needed to keep the padded FFT frequency bins aligned with the input
+        frequency grid. Padding trades memory and computation for more or less
+        separation from the periodic seam. It must be positive when the
+        selected frequency rows include a nonzero frequency. This option is
+        not allowed with ``boundary="periodic"``.
 
     Returns
     -------
@@ -446,35 +599,84 @@ def s_transform(
             output_length,
         )
     )
-    n_samples = ts_arr.size
-    frequency_resolution = sample_rate / n_samples
-    max_bin = n_samples // 2
+    input_length = ts_arr.size
+    boundary = _normalize_boundary(boundary)
+    if boundary_padding is not None:
+        boundary_padding = _as_integer_scalar(
+            boundary_padding,
+            "boundary_padding",
+        )
+        if boundary_padding < 0:
+            raise ValueError("boundary_padding must be non-negative")
 
-    # Use canonical signed bins. For even lengths, the Nyquist bin has only
-    # one representation and is assigned the positive sign.
-    min_signed_bin = -((n_samples - 1) // 2)
-    max_signed_bin = n_samples // 2
-    start_bin = max(
-        min_signed_bin,
-        int(np.ceil(fmin / frequency_resolution - 1e-12)),
+    original_grid_indices = _select_frequency_indices(
+        input_length,
+        sample_rate,
+        fmin,
+        fmax,
+        frequency_step,
     )
-    stop_bin = min(
-        max_signed_bin,
-        int(np.floor(fmax / frequency_resolution + 1e-12)),
+    original_grid_signed_indices = np.where(
+        original_grid_indices <= input_length // 2,
+        original_grid_indices,
+        original_grid_indices - input_length,
     )
-    if start_bin > stop_bin:
-        raise ValueError("frequency_range does not contain an available FFT bin")
-    step_bins = max(
-        1,
-        int(np.ceil(frequency_step / frequency_resolution - 1e-12)),
+
+    if boundary == "periodic":
+        if boundary_padding not in (None, 0):
+            raise ValueError(
+                "boundary_padding can only be used with boundary='zeros'"
+            )
+        padding = 0
+        transform_multiple = 1
+        transform_length = input_length
+    else:
+        nonzero_original_bins = np.abs(
+            original_grid_signed_indices[original_grid_signed_indices != 0]
+        )
+        if boundary_padding is None:
+            if nonzero_original_bins.size:
+                padding_ratio = (
+                    _BOUNDARY_PADDING_SIGMAS
+                    * alpha
+                    / nonzero_original_bins.min()
+                )
+                if (
+                    not np.isfinite(padding_ratio)
+                    or padding_ratio > np.iinfo(np.int64).max / input_length
+                ):
+                    raise ValueError("automatic boundary padding is too large")
+                requested_padding = int(np.ceil(padding_ratio * input_length))
+            else:
+                requested_padding = 0
+        else:
+            requested_padding = boundary_padding
+        if nonzero_original_bins.size and requested_padding == 0:
+            raise ValueError(
+                "boundary_padding must be positive when nonzero frequencies "
+                "are selected"
+            )
+        if requested_padding == 0:
+            transform_multiple = 1
+        else:
+            transform_multiple = max(
+                2,
+                (2 * requested_padding + 2 * input_length - 1) // input_length,
+            )
+            # Keep the padded and original lengths at matching parity so
+            # original FFT-bin frequencies map exactly onto padded FFT bins.
+            if input_length % 2 and transform_multiple % 2 == 0:
+                transform_multiple += 1
+        transform_length = input_length * transform_multiple
+        padding = (transform_multiple - 1) * input_length // 2
+
+    if transform_length > np.iinfo(np.int64).max:
+        raise ValueError("boundary padding produces an unsupported transform length")
+    frequency_indices = np.mod(
+        original_grid_signed_indices * transform_multiple,
+        transform_length,
     )
-    signed_frequency_indices = np.arange(
-        start_bin,
-        stop_bin + 1,
-        step_bins,
-        dtype=np.int64,
-    )
-    frequency_indices = np.mod(signed_frequency_indices, n_samples)
+    max_bin = transform_length // 2
 
     if max_output_elements is not None:
         max_output_elements = _as_integer_scalar(
@@ -483,7 +685,7 @@ def s_transform(
         )
         if max_output_elements <= 0:
             raise ValueError("max_output_elements must be positive or None")
-    output_columns = n_samples if output_length is None else output_length
+    output_columns = input_length if output_length is None else output_length
     output_elements = frequency_indices.size * output_columns
     if (
         max_output_elements is not None
@@ -496,35 +698,44 @@ def s_transform(
             "max_output_elements=None"
         )
 
-    spectrum = fft.fft(ts_arr)
+    working_signal = (
+        ts_arr
+        if boundary == "periodic"
+        else np.pad(ts_arr, (padding, padding), mode="constant")
+    )
+    spectrum = fft.fft(working_signal)
     transform = np.empty(
         (frequency_indices.size, output_columns),
         dtype=np.complex128,
     )
     dc_rows = np.flatnonzero(frequency_indices == 0)
     if dc_rows.size:
-        dc_value = spectrum[0] / n_samples
-        if output_columns == n_samples:
-            transform[dc_rows] = dc_value
-        else:
+        dc_value = (
+            spectrum[0] / transform_length
+            if boundary == "periodic"
+            else np.mean(ts_arr)
+        )
+        if boundary == "periodic" and output_columns != input_length:
             dc_row = signal.resample(
-                np.full(n_samples, dc_value, dtype=np.complex128),
+                np.full(input_length, dc_value, dtype=np.complex128),
                 output_columns,
             )
             transform[dc_rows] = dc_row
+        else:
+            transform[dc_rows] = dc_value
 
     nonzero_rows = np.flatnonzero(frequency_indices != 0)
     if nonzero_rows.size:
         chunk_size = _frequency_chunk_size(
-            n_samples,
+            transform_length,
             output_columns,
             nonzero_rows.size,
         )
-        sample_bins = np.arange(n_samples, dtype=np.int64)
+        sample_bins = np.arange(transform_length, dtype=np.int64)
         signed_sample_bins = np.where(
             sample_bins <= max_bin,
             sample_bins,
-            sample_bins - n_samples,
+            sample_bins - transform_length,
         )
 
         for chunk_start in range(0, nonzero_rows.size, chunk_size):
@@ -533,11 +744,11 @@ def s_transform(
             signed_frequency_bins = np.where(
                 chunk_frequency_indices <= max_bin,
                 chunk_frequency_indices,
-                chunk_frequency_indices - n_samples,
+                chunk_frequency_indices - transform_length,
             )
 
             shifted_spectra = np.empty(
-                (row_positions.size, n_samples),
+                (row_positions.size, transform_length),
                 dtype=np.complex128,
             )
             for chunk_row, frequency_index in enumerate(chunk_frequency_indices):
@@ -557,7 +768,18 @@ def s_transform(
             del windows
 
             rows = fft.ifft(shifted_spectra, axis=-1, overwrite_x=True)
-            if output_columns != n_samples:
+            if boundary == "zeros":
+                rows = rows[:, padding : padding + input_length]
+                if output_columns != input_length:
+                    divisor = int(np.gcd(input_length, output_columns))
+                    rows = signal.resample_poly(
+                        rows,
+                        output_columns // divisor,
+                        input_length // divisor,
+                        axis=-1,
+                        padtype="constant",
+                    )
+            elif output_columns != input_length:
                 rows = signal.resample(rows, output_columns, axis=-1)
             transform[row_positions] = rows
 
@@ -565,8 +787,12 @@ def s_transform(
         data=transform,
         frequency_indices=frequency_indices,
         sample_rate=sample_rate,
-        input_length=n_samples,
+        input_length=input_length,
         real_input=not np.iscomplexobj(ts),
+        transform_length=transform_length,
+        boundary=boundary,
+        boundary_padding=padding,
+        inverse_compatible=boundary == "periodic",
     )
 
 
@@ -577,6 +803,8 @@ def inverse_s_transform(
     frequency_indices: ArrayLike | None = None,
     original_length: int | None = None,
     real_output: bool | None = None,
+    boundary: BoundaryMode | None = None,
+    inverse_compatible: bool | None = None,
 ) -> tuple[NDArray[np.complex128], NDArray[np.complex128]]:
     """Reconstruct a signal from an S-transform table.
 
@@ -604,6 +832,15 @@ def inverse_s_transform(
     real_output : bool, optional
         Mirror positive-frequency coefficients when true. Inferred from the
         forward-transform metadata when available.
+    boundary : {"periodic", "zeros"}, optional
+        Boundary condition used to create a plain ndarray table. Only
+        ``"periodic"`` tables are supported by this inverse implementation.
+        Inferred from ``STransform`` metadata when available.
+    inverse_compatible : bool, optional
+        Whether the table uses periodic time-domain rows supported by this
+        inverse implementation. Inferred from ``STransform`` metadata when
+        available. Zero-boundary transforms cropped to the input interval are
+        not compatible with this inverse.
     """
     if low_frequency_index is not None and frequency_indices is not None:
         raise ValueError(
@@ -616,6 +853,33 @@ def inverse_s_transform(
             "low_frequency_index cannot be supplied with an STransform"
         )
 
+    if metadata is not None:
+        if boundary is not None and _normalize_boundary(boundary) != metadata.boundary:
+            raise ValueError("boundary does not match the transform metadata")
+        if inverse_compatible is not None and _as_bool_scalar(
+            inverse_compatible,
+            "inverse_compatible",
+        ) != metadata.inverse_compatible:
+            raise ValueError("inverse_compatible does not match the transform metadata")
+        if not metadata.inverse_compatible:
+            raise ValueError(
+                "this boundary-extended transform is cropped to the input interval "
+                "and cannot be inverted by inverse_s_transform"
+            )
+    else:
+        boundary_value = (
+            "periodic" if boundary is None else _normalize_boundary(boundary)
+        )
+        inverse_compatible_value = (
+            True
+            if inverse_compatible is None
+            else _as_bool_scalar(inverse_compatible, "inverse_compatible")
+        )
+        if boundary_value != "periodic" or not inverse_compatible_value:
+            raise ValueError(
+                "inverse_s_transform only supports inverse-compatible periodic tables"
+            )
+
     table_arr = np.asarray(
         metadata.data if metadata is not None else table,
         dtype=np.complex128,
@@ -627,7 +891,7 @@ def inverse_s_transform(
     n_frequencies, n_time = table_arr.shape
 
     if metadata is not None:
-        inferred_length = metadata.input_length
+        inferred_length = metadata._fft_length
     else:
         inferred_length = None
         if original_length is None:

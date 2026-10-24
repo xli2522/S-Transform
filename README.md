@@ -64,6 +64,21 @@ Therefore, increasing ``alpha`` broadens the window in time and narrows its
 frequency response; decreasing it gives finer time localization and broader
 frequency response. The default ``alpha=1`` is the standard Stockwell window.
 
+The default `boundary="periodic"` treats the finite input as one period, so
+the first and last samples are neighbors in the discrete transform. For
+nonperiodic records, `boundary="zeros"` instead zero-extends the input on
+both sides before computing the transform, then returns columns for the
+original time interval. Padding defaults to six temporal Gaussian standard
+deviations at the lowest selected nonzero frequency; the actual value is
+available as `st.boundary_padding`. `st.transform_length` records the
+extended FFT length used by the frequency-bin metadata, while
+`st.input_length` and `st.duration` continue to describe the original
+record. Because the returned columns are cropped, zero-boundary transforms
+cannot be reconstructed with `inverse_s_transform`. This option reduces
+circular wrap-around, but it cannot remove the broad time support of very low
+frequencies (or make the zero continuation a perfect model of the unobserved
+signal).
+
 For a display in decibels, use a display floor appropriate to the application:
 
 ```python

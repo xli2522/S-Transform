@@ -389,6 +389,160 @@ def test_transform_exposes_physical_axis_metadata():
     )
     assert transform.inverse_kwargs["original_length"] == 16
     assert transform.inverse_kwargs["real_output"] is True
+    assert transform.inverse_kwargs["boundary"] == "periodic"
+    assert transform.inverse_kwargs["inverse_compatible"] is True
+
+
+def test_periodic_boundary_remains_the_default_and_explicit_result_is_unchanged():
+    samples = np.exp(-2j * np.pi * 3 * np.arange(32) / 32)
+
+    implicit = s_transform(samples, sample_rate=32)
+    explicit = s_transform(samples, sample_rate=32, boundary="periodic")
+
+    np.testing.assert_array_equal(implicit.data, explicit.data)
+    np.testing.assert_array_equal(
+        implicit.frequency_indices,
+        explicit.frequency_indices,
+    )
+    assert implicit.boundary == "periodic"
+    assert implicit.transform_length == len(samples)
+    assert implicit.inverse_compatible
+
+
+@pytest.mark.parametrize("impulse_index, opposite_column", [(0, -1), (-1, 0)])
+@pytest.mark.parametrize(
+    "frequency_range, frequency_hz",
+    [((7.5, 8.5), 8.0), ((-8.5, -7.5), -8.0)],
+)
+def test_zero_boundary_padding_reduces_wraparound_for_localized_frequency(
+    impulse_index,
+    opposite_column,
+    frequency_range,
+    frequency_hz,
+):
+    samples = np.zeros(256)
+    samples[impulse_index] = 1.0
+
+    periodic = s_transform(
+        samples,
+        sample_rate=256,
+        frequency_range=frequency_range,
+    )
+    zero_boundary = s_transform(
+        samples,
+        sample_rate=256,
+        frequency_range=frequency_range,
+        boundary="zeros",
+    )
+
+    assert zero_boundary.boundary == "zeros"
+    assert zero_boundary.boundary_padding >= 6 * 256 / abs(frequency_hz)
+    assert zero_boundary.transform_length == (
+        len(samples) + 2 * zero_boundary.boundary_padding
+    )
+    assert zero_boundary.input_length == len(samples)
+    assert zero_boundary.data.shape[1] == len(samples)
+    assert zero_boundary.inverse_compatible is False
+    np.testing.assert_allclose(zero_boundary.frequencies, periodic.frequencies)
+    assert zero_boundary.frequencies[0] == frequency_hz
+    assert abs(zero_boundary.data[0, opposite_column]) < (
+        abs(periodic.data[0, opposite_column]) * 1e-6
+    )
+
+
+def test_zero_boundary_does_not_claim_to_localize_the_lowest_frequency():
+    samples = np.zeros(256)
+    samples[0] = 1.0
+
+    transform = s_transform(
+        samples,
+        sample_rate=256,
+        frequency_range=(0.5, 1.5),
+        boundary="zeros",
+    )
+
+    # At f=1 Hz, alpha=1 gives a one-second Gaussian width, equal to this
+    # record's duration. Broad support remains even after circular wrap is
+    # moved outside the returned interval.
+    assert abs(transform.data[0, -1]) > abs(transform.data[0, 0]) * 0.4
+
+
+@pytest.mark.parametrize("n_samples", [31, 32])
+def test_zero_boundary_preserves_frequency_grid_for_odd_even_complex_inputs(
+    n_samples,
+):
+    sample_indices = np.arange(n_samples)
+    samples = np.exp(-2j * np.pi * 3 * sample_indices / n_samples)
+
+    periodic = s_transform(
+        samples,
+        sample_rate=n_samples,
+        frequency_range=(2.5, 3.5),
+    )
+    zero_boundary = s_transform(
+        samples,
+        sample_rate=n_samples,
+        frequency_range=(2.5, 3.5),
+        boundary="zeros",
+    )
+
+    np.testing.assert_array_equal(zero_boundary.frequencies, periodic.frequencies)
+    assert zero_boundary.frequencies[0] == 3.0
+    assert zero_boundary.transform_length % n_samples == 0
+
+
+@pytest.mark.parametrize("output_length", [32, 96])
+def test_zero_boundary_resampling_avoids_fourier_periodic_resampling(output_length):
+    samples = np.zeros(64)
+    samples[0] = 1.0
+
+    transform = s_transform(
+        samples,
+        sample_rate=64,
+        frequency_range=(7.5, 8.5),
+        output_length=output_length,
+        boundary="zeros",
+    )
+
+    assert transform.data.shape == (1, output_length)
+    assert transform.is_downsampled is (output_length < len(samples))
+    assert transform.is_upsampled is (output_length > len(samples))
+    assert transform.time_step == pytest.approx(1.0 / output_length)
+
+
+def test_zero_boundary_metadata_rejects_inversion_and_survives_pickle():
+    transform = s_transform(
+        np.arange(32, dtype=float),
+        sample_rate=32,
+        frequency_range=(0, 16),
+        boundary="zeros",
+    )
+    restored = pickle.loads(pickle.dumps(transform))
+
+    assert restored == transform
+    assert restored.transform_length == transform.transform_length
+    assert restored.boundary_padding == transform.boundary_padding
+    assert restored.inverse_kwargs["original_length"] == transform.transform_length
+    assert restored.inverse_kwargs["boundary"] == "zeros"
+    assert restored.inverse_kwargs["inverse_compatible"] is False
+    with pytest.raises(ValueError, match="cannot be inverted"):
+        inverse_s_transform(transform)
+    with pytest.raises(ValueError, match="inverse-compatible periodic"):
+        inverse_s_transform(np.asarray(transform), **transform.inverse_kwargs)
+
+
+def test_boundary_padding_validation():
+    samples = np.ones(16)
+    with pytest.raises(ValueError, match="only be used"):
+        s_transform(samples, sample_rate=16, boundary_padding=4)
+    with pytest.raises(ValueError, match="must be positive"):
+        s_transform(
+            samples,
+            sample_rate=16,
+            frequency_range=(0.5, 1.5),
+            boundary="zeros",
+            boundary_padding=0,
+        )
 
 
 def test_frequency_range_is_order_independent():
