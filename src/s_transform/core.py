@@ -418,8 +418,11 @@ def s_transform(
         Requested frequency spacing in hertz. The actual spacing is rounded
         up to an integer number of FFT bins. The default is one FFT bin.
     alpha : float, optional
-        Positive Gaussian width multiplier. ``alpha=1`` is the standard
-        Stockwell window; larger values produce narrower windows.
+        Positive Gaussian width multiplier. For a nonzero frequency ``f``,
+        the corresponding temporal Gaussian has standard deviation
+        ``alpha / abs(f)``. ``alpha=1`` is the standard Stockwell window;
+        larger values broaden the window in time and narrow it in frequency,
+        while smaller values do the reverse.
     output_length : int, optional
         Number of columns in the returned transform. The default is the input
         length. Values smaller than the input downsample the time axis; larger
