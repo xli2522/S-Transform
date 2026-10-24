@@ -111,11 +111,18 @@ def test_default_transform_contains_dc_through_nyquist():
 
 
 @pytest.mark.parametrize(
-    ("n_samples", "is_complex", "frequency_range", "frequency_step", "alpha"),
+    (
+        "n_samples",
+        "is_complex",
+        "frequency_range",
+        "frequency_step",
+        "alpha",
+        "expected_signed_frequency_indices",
+    ),
     [
-        (7, False, None, None, 0.6),
-        (8, True, (-4.0, 4.0), None, 1.0),
-        (9, True, (-3.1, 2.9), 1.5, 1.7),
+        (7, False, None, None, 0.6, (0, 1, 2, 3)),
+        (8, True, (-4.0, 4.0), None, 1.0, (-3, -2, -1, 0, 1, 2, 3, 4)),
+        (9, True, (-3.1, 2.9), 1.5, 1.7, (-3, -1, 1)),
     ],
 )
 def test_transform_matches_direct_discrete_definition(
@@ -124,6 +131,7 @@ def test_transform_matches_direct_discrete_definition(
     frequency_range,
     frequency_step,
     alpha,
+    expected_signed_frequency_indices,
 ):
     rng = np.random.default_rng(10_000 + n_samples)
     samples = rng.standard_normal(n_samples)
@@ -138,6 +146,18 @@ def test_transform_matches_direct_discrete_definition(
         alpha=alpha,
     )
 
+    expected_signed_indices = np.asarray(
+        expected_signed_frequency_indices,
+        dtype=np.int64,
+    )
+    np.testing.assert_array_equal(
+        transform.signed_frequency_indices,
+        expected_signed_indices,
+    )
+    np.testing.assert_array_equal(
+        transform.frequency_indices,
+        np.mod(expected_signed_indices, n_samples),
+    )
     np.testing.assert_allclose(
         transform.data,
         _direct_discrete_reference(samples, transform, alpha),
@@ -147,8 +167,18 @@ def test_transform_matches_direct_discrete_definition(
 
 
 @pytest.mark.parametrize("alpha", [0.5, 1.0, 1.8])
-@pytest.mark.parametrize("n_samples", [7, 8])
-def test_each_transform_row_preserves_its_input_spectrum_bin(n_samples, alpha):
+@pytest.mark.parametrize(
+    ("n_samples", "expected_signed_frequency_indices"),
+    [
+        (7, (-3, -2, -1, 0, 1, 2, 3)),
+        (8, (-3, -2, -1, 0, 1, 2, 3, 4)),
+    ],
+)
+def test_each_transform_row_preserves_its_input_spectrum_bin(
+    n_samples,
+    expected_signed_frequency_indices,
+    alpha,
+):
     rng = np.random.default_rng(20_000 + n_samples)
     samples = rng.standard_normal(n_samples) + 1j * rng.standard_normal(n_samples)
     transform = s_transform(
@@ -158,6 +188,18 @@ def test_each_transform_row_preserves_its_input_spectrum_bin(n_samples, alpha):
         alpha=alpha,
     )
 
+    expected_signed_indices = np.asarray(
+        expected_signed_frequency_indices,
+        dtype=np.int64,
+    )
+    np.testing.assert_array_equal(
+        transform.signed_frequency_indices,
+        expected_signed_indices,
+    )
+    np.testing.assert_array_equal(
+        transform.frequency_indices,
+        np.mod(expected_signed_indices, n_samples),
+    )
     row_spectra = fft.fft(transform.data, axis=1)
     np.testing.assert_allclose(
         row_spectra[:, 0],
