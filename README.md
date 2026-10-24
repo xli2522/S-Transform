@@ -58,6 +58,12 @@ To inspect the magnitude, use the explicit numerical array:
 magnitude = np.abs(st.data)
 ```
 
+The ``alpha`` parameter controls the Gaussian window width. At nonzero
+frequency ``f``, its temporal standard deviation is ``alpha / abs(f)``.
+Therefore, increasing ``alpha`` broadens the window in time and narrows its
+frequency response; decreasing it gives finer time localization and broader
+frequency response. The default ``alpha=1`` is the standard Stockwell window.
+
 For a display in decibels, use a display floor appropriate to the application:
 
 ```python
